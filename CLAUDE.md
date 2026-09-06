@@ -30,7 +30,7 @@ scaffold Flask/web/Electron code until that phase is explicitly started.
 - `architect.py` — hidden one-time LLM call: reconciles random picks into a cohesive adventure skeleton
 - `adventure.py` — building-block tables, draft_outline(), adventure_prompt_block(), advance_beat(), apply_adaptation()
 - `profile.py` — player profile CRUD + adventure history (repeat-avoidance)
-- `ollama_client.py` — shared call_ollama()/warmup(), used by dm.py and architect.py
+- `ollama_client.py` — shared call_ollama()/warmup(), used by dm.py and architect.py; resolves DEFAULT_MODEL (fallback constant, overridable via DND_LITE_MODEL env var)
 - `session.py` — per-adventure session schema + JSON persistence (one active file per profile)
 
 ## Conventions
@@ -52,6 +52,12 @@ scaffold Flask/web/Electron code until that phase is explicitly started.
   reintroduce a session-name picker or multi-save list.
 - Ollama call plumbing lives in `ollama_client.py` only; no
   provider-abstraction layer until a second provider actually exists.
+- Model selection has three layers, in increasing precedence:
+  `ollama_client._FALLBACK_MODEL` → `DND_LITE_MODEL` env var → `--model` CLI
+  flag (threaded through `main.py` → `cli.main(model=...)` →
+  `DungeonMaster(model)`). Don't add a config file on top of this — it's
+  deliberately just these three, matching the "no config.py" call made
+  earlier in the project.
 - Sessions autosave after every turn; profiles are updated at adventure
   start and on completion (`[CLIMAX]` → `[BREAK]`).
 - No comments unless the WHY is non-obvious.
@@ -59,9 +65,8 @@ scaffold Flask/web/Electron code until that phase is explicitly started.
 ## Running
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-ollama pull llama3.1:8b   # DEFAULT_MODEL in ollama_client.py; swap for a
-                          # larger model (e.g. nous-hermes2:10.7b) if you
-                          # have a capable GPU -- it'll be faster and better
+ollama pull llama3.1:8b   # the default -- see README.md "Choosing a model"
+                          # for the env var / --model override options
 ollama serve
 .venv/bin/python main.py
 ```

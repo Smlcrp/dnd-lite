@@ -75,3 +75,13 @@ def test_call_ollama_uses_generous_timeout_for_cpu_cold_starts():
     # A cold model load on CPU can take well over a minute -- keep enough
     # margin that a slow first turn doesn't spuriously raise RuntimeError.
     assert mock_post.call_args.kwargs["timeout"] >= 300
+
+
+def test_resolve_default_model_uses_env_var_when_set(monkeypatch):
+    monkeypatch.setenv("DND_LITE_MODEL", "qwen2.5:7b")
+    assert ollama_client._resolve_default_model() == "qwen2.5:7b"
+
+
+def test_resolve_default_model_falls_back_without_env_var(monkeypatch):
+    monkeypatch.delenv("DND_LITE_MODEL", raising=False)
+    assert ollama_client._resolve_default_model() == ollama_client._FALLBACK_MODEL

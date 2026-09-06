@@ -33,7 +33,7 @@ DND-Lite/
 ├── architect.py        # hidden one-time LLM call: reconciles random picks into a cohesive adventure skeleton
 ├── adventure.py        # building-block tables, draft_outline(), adventure_prompt_block(), advance_beat(), apply_adaptation()
 ├── profile.py           # player profile CRUD + adventure history (for repeat-avoidance)
-├── ollama_client.py     # shared call_ollama()/warmup() used by dm.py and architect.py
+├── ollama_client.py     # shared call_ollama()/warmup() used by dm.py and architect.py; resolves DEFAULT_MODEL (fallback / DND_LITE_MODEL env var)
 ├── session.py          # per-adventure session dict schema + JSON persistence (one active file per profile)
 ├── sessions/           # one file per profile: sessions/<profile_slug>.json (gitignored, created at runtime)
 ├── profiles/           # profile files (gitignored, created at runtime)
@@ -315,13 +315,7 @@ No combat engine, no character stats/HP, no companions, no XP/leveling, no TTS, 
 
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-ollama pull llama3.1:8b   # the default in ollama_client.py -- runs
-                          # acceptably (~30-60s/turn) on an 8-core CPU with
-                          # no GPU, and reliably follows the tag/JSON
-                          # instructions the game depends on. If you have a
-                          # capable GPU, a larger model (e.g.
-                          # nous-hermes2:10.7b) will be faster and better --
-                          # just change DEFAULT_MODEL in ollama_client.py.
+ollama pull llama3.1:8b   # the default -- see "Choosing a model" below
 ollama serve
 .venv/bin/python main.py
 ```
@@ -330,3 +324,19 @@ Run the test suite (Ollama mocked, no live server needed) with:
 ```
 .venv/bin/python -m pytest tests/
 ```
+
+### Choosing a model
+
+`llama3.1:8b` is the built-in default -- it runs acceptably (~30-60s/turn) on an 8-core CPU with no GPU, and reliably follows the tag/JSON instructions the game depends on. If you have a capable GPU, a larger model (e.g. `nous-hermes2:10.7b`) will be both faster and higher quality. Three ways to switch, in increasing precedence:
+
+1. **Edit the fallback** — change `_FALLBACK_MODEL` in `ollama_client.py`.
+2. **Environment variable** — set `DND_LITE_MODEL` before launching:
+   ```
+   DND_LITE_MODEL=nous-hermes2:10.7b .venv/bin/python main.py
+   ```
+3. **`--model` flag** — overrides everything else for a single run:
+   ```
+   .venv/bin/python main.py --model nous-hermes2:10.7b
+   ```
+
+Whichever model you pick, `ollama pull` it first. The chosen model applies to both the main narration (`dm.py`) and the one-time adventure architect pass (`architect.py`).

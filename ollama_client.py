@@ -6,16 +6,28 @@ provider actually needs supporting.
 """
 
 import json
+import os
 
 import requests
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
+
 # llama3.1:8b: reliably follows the tag/JSON instructions and runs
 # acceptably (~30-60s/turn) on an 8-core CPU with no GPU. On a machine with
 # a capable GPU, a larger model (e.g. nous-hermes2:10.7b) will be both
-# faster and higher quality -- change this constant, or pass model= to
-# DungeonMaster()/architect.build_adventure() directly.
-DEFAULT_MODEL = "llama3.1:8b"
+# faster and higher quality. Three ways to change it, in increasing
+# precedence: edit _FALLBACK_MODEL below; set the DND_LITE_MODEL environment
+# variable; or pass --model at the command line (see main.py), which flows
+# through to DungeonMaster()/architect.build_adventure() as an explicit
+# model= argument.
+_FALLBACK_MODEL = "llama3.1:8b"
+
+
+def _resolve_default_model() -> str:
+    return os.environ.get("DND_LITE_MODEL", _FALLBACK_MODEL)
+
+
+DEFAULT_MODEL = _resolve_default_model()
 
 
 def warmup(model: str = DEFAULT_MODEL) -> None:

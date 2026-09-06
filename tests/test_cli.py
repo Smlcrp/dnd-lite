@@ -48,3 +48,40 @@ def test_main_handles_ollama_failure_gracefully(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "DM error" in out
     assert "ollama serve" in out
+
+
+def test_main_passes_explicit_model_override_to_dungeon_master(monkeypatch):
+    monkeypatch.setattr(cli, "_pick_profile", lambda: profile.create_profile("Sam"))
+    monkeypatch.setattr(cli, "_startup_menu", lambda prof: "quit")
+
+    captured = {}
+
+    class FakeDungeonMaster:
+        def __init__(self, model):
+            captured["model"] = model
+
+    monkeypatch.setattr(cli.dm, "DungeonMaster", FakeDungeonMaster)
+
+    cli.main(model="qwen2.5:7b")
+
+    assert captured["model"] == "qwen2.5:7b"
+
+
+def test_main_uses_dungeon_master_default_when_no_model_given(monkeypatch):
+    """With no --model override, DungeonMaster() must be constructed with no
+    argument at all -- not model=None -- so it falls back to its own default
+    (ollama_client.DEFAULT_MODEL) rather than a broken None model string."""
+    monkeypatch.setattr(cli, "_pick_profile", lambda: profile.create_profile("Sam"))
+    monkeypatch.setattr(cli, "_startup_menu", lambda prof: "quit")
+
+    captured = {"args": "not called"}
+
+    class FakeDungeonMaster:
+        def __init__(self, *args):
+            captured["args"] = args
+
+    monkeypatch.setattr(cli.dm, "DungeonMaster", FakeDungeonMaster)
+
+    cli.main()
+
+    assert captured["args"] == ()

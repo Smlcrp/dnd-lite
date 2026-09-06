@@ -221,9 +221,11 @@ def _main_loop(prof: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
             print("(This feels like a good stopping point -- type 'save' or 'quit' when ready.)\n")
 
 
-def main() -> None:
+def main(model: str = None) -> None:
     prof = _pick_profile()
-    dungeon_master = dm.DungeonMaster()
+    dungeon_master = dm.DungeonMaster(model) if model else dm.DungeonMaster()
+    if model:
+        print(f"(using model: {model})")
 
     action = _startup_menu(prof)
     if action == "quit":
