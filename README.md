@@ -2,7 +2,7 @@
 
 A lightweight, text-based AI Dungeon Master. It narrates a D&D adventure for a character you already have — no in-app character creation or stat management.
 
-**Status: design phase — no code written yet.** This README currently holds the full architecture/design plan; implementation hasn't started.
+**Status: v1 implemented.** All modules described below are built, with 69 unit tests (Ollama mocked) and a manually-verified end-to-end playthrough against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
 
 ## Context
 
@@ -311,10 +311,22 @@ No combat engine, no character stats/HP, no companions, no XP/leveling, no TTS, 
 - `pytest tests/` — all unit tests pass (session/profile persistence round-trips, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`) without a live Ollama server.
 - Manual playtest per build-order step 9.
 
-## Running (once built)
+## Running
 
 ```
-ollama pull <model>
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+ollama pull llama3.1:8b   # the default in ollama_client.py -- runs
+                          # acceptably (~30-60s/turn) on an 8-core CPU with
+                          # no GPU, and reliably follows the tag/JSON
+                          # instructions the game depends on. If you have a
+                          # capable GPU, a larger model (e.g.
+                          # nous-hermes2:10.7b) will be faster and better --
+                          # just change DEFAULT_MODEL in ollama_client.py.
 ollama serve
-python main.py
+.venv/bin/python main.py
+```
+
+Run the test suite (Ollama mocked, no live server needed) with:
+```
+.venv/bin/python -m pytest tests/
 ```

@@ -99,3 +99,17 @@ def test_parse_adventure_json_rejects_missing_antagonist_fields():
 
 def test_parse_adventure_json_rejects_non_dict():
     assert architect._parse_adventure_json("[1, 2, 3]", 1) is None
+
+
+def test_build_adventure_passes_explicit_model_through():
+    with patch("architect.ollama_client.call_ollama", return_value=_valid_json_response(3)) as mock_call:
+        architect.build_adventure(
+            _draft(), "Kessa", ["Ranger"], "cautious", "Quest", model="llama3.2:1b"
+        )
+    assert mock_call.call_args.args[1] == "llama3.2:1b"
+
+
+def test_build_adventure_defaults_to_ollama_client_default_model():
+    with patch("architect.ollama_client.call_ollama", return_value=_valid_json_response(3)) as mock_call:
+        architect.build_adventure(_draft(), "Kessa", ["Ranger"], "cautious", "Quest")
+    assert mock_call.call_args.args[1] == architect.ollama_client.DEFAULT_MODEL

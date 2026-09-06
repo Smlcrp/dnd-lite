@@ -58,7 +58,10 @@ scaffold Flask/web/Electron code until that phase is explicitly started.
 
 ## Running
 ```
-ollama pull <model>
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+ollama pull llama3.1:8b   # DEFAULT_MODEL in ollama_client.py; swap for a
+                          # larger model (e.g. nous-hermes2:10.7b) if you
+                          # have a capable GPU -- it'll be faster and better
 ollama serve
-python main.py
+.venv/bin/python main.py
 ```

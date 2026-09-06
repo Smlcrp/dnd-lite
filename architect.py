@@ -137,11 +137,19 @@ def _fallback_adventure(draft: dict, n_beats: int) -> dict:
     }
 
 
-def build_adventure(draft: dict, character_name: str, classes: list, blurb: str, preset: str) -> dict:
+def build_adventure(
+    draft: dict,
+    character_name: str,
+    classes: list,
+    blurb: str,
+    preset: str,
+    model: str = None,
+) -> dict:
+    model = model or ollama_client.DEFAULT_MODEL
     n_beats = adventure.PRESETS[preset]["beats"]
     messages = _build_messages(draft, character_name, classes, blurb, n_beats)
 
-    raw = ollama_client.call_ollama(messages)
+    raw = ollama_client.call_ollama(messages, model)
     parsed = _parse_adventure_json(raw, n_beats)
 
     if parsed is None:
@@ -156,7 +164,7 @@ def build_adventure(draft: dict, character_name: str, classes: list, blurb: str,
                 ),
             },
         ]
-        raw2 = ollama_client.call_ollama(retry_messages)
+        raw2 = ollama_client.call_ollama(retry_messages, model)
         parsed = _parse_adventure_json(raw2, n_beats)
 
     if parsed is None:

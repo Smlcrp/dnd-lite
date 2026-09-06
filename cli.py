@@ -132,7 +132,9 @@ def _start_new_adventure(prof: dict, dungeon_master: dm.DungeonMaster) -> dict:
 
     draft = adventure.draft_outline(tone, prof)
     print("\nThe DM is preparing your adventure...")
-    full_adventure = architect.build_adventure(draft, character_name, classes, blurb, preset)
+    full_adventure = architect.build_adventure(
+        draft, character_name, classes, blurb, preset, model=dungeon_master.model
+    )
 
     session.delete_session(prof["profile_name"])
 
@@ -228,10 +230,15 @@ def main() -> None:
         print("Goodbye.")
         return
 
-    if action == "new":
-        s = _start_new_adventure(prof, dungeon_master)
-    else:
-        s = _resume_adventure(prof, dungeon_master)
+    try:
+        if action == "new":
+            s = _start_new_adventure(prof, dungeon_master)
+        else:
+            s = _resume_adventure(prof, dungeon_master)
+    except RuntimeError as e:
+        print(f"\n[DM error: {e}]")
+        print("Make sure 'ollama serve' is running (and the model is pulled), then try again.")
+        return
 
     _main_loop(prof, s, dungeon_master)
 

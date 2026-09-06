@@ -10,7 +10,12 @@ import json
 import requests
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-DEFAULT_MODEL = "nous-hermes2:10.7b"
+# llama3.1:8b: reliably follows the tag/JSON instructions and runs
+# acceptably (~30-60s/turn) on an 8-core CPU with no GPU. On a machine with
+# a capable GPU, a larger model (e.g. nous-hermes2:10.7b) will be both
+# faster and higher quality -- change this constant, or pass model= to
+# DungeonMaster()/architect.build_adventure() directly.
+DEFAULT_MODEL = "llama3.1:8b"
 
 
 def warmup(model: str = DEFAULT_MODEL) -> None:
@@ -21,7 +26,7 @@ def warmup(model: str = DEFAULT_MODEL) -> None:
         requests.post(
             OLLAMA_URL,
             json={"model": model, "messages": [{"role": "user", "content": "hi"}], "stream": False},
-            timeout=120,
+            timeout=300,
         )
     except requests.RequestException:
         pass
@@ -37,7 +42,7 @@ def call_ollama(messages: list, model: str = DEFAULT_MODEL) -> str:
         resp = requests.post(
             OLLAMA_URL,
             json={"model": model, "messages": messages, "stream": False},
-            timeout=120,
+            timeout=300,
         )
         resp.raise_for_status()
     except requests.RequestException as e:
@@ -57,7 +62,7 @@ def stream_ollama(messages: list, model: str = DEFAULT_MODEL):
         resp = requests.post(
             OLLAMA_URL,
             json={"model": model, "messages": messages, "stream": True},
-            timeout=120,
+            timeout=300,
             stream=True,
         )
         resp.raise_for_status()

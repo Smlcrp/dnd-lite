@@ -62,3 +62,16 @@ def test_stream_ollama_raises_runtime_error_on_connection_failure():
 def test_warmup_swallows_exceptions():
     with patch("ollama_client.requests.post", side_effect=requests.ConnectionError("refused")):
         ollama_client.warmup()  # should not raise
+
+
+def test_call_ollama_uses_generous_timeout_for_cpu_cold_starts():
+    fake_resp = MagicMock()
+    fake_resp.raise_for_status.return_value = None
+    fake_resp.json.return_value = {"message": {"content": "ok"}}
+
+    with patch("ollama_client.requests.post", return_value=fake_resp) as mock_post:
+        ollama_client.call_ollama([{"role": "user", "content": "hi"}])
+
+    # A cold model load on CPU can take well over a minute -- keep enough
+    # margin that a slow first turn doesn't spuriously raise RuntimeError.
+    assert mock_post.call_args.kwargs["timeout"] >= 300
