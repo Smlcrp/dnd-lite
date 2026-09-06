@@ -380,6 +380,15 @@ No combat engine, no character stats/HP, no companions, no XP counter, no mechan
 
 ## Running
 
+One-command setup + launch (creates the venv, installs deps, starts Ollama
+if it isn't already running, pulls the default model if needed, then starts
+the game):
+```
+./play.sh
+```
+Arguments pass through to `main.py`, e.g. `./play.sh --model nous-hermes2:10.7b`.
+
+Manual step-by-step, if you'd rather run each piece yourself:
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 ollama pull llama3.1:8b   # the default -- see "Choosing a model" below
