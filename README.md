@@ -6,11 +6,11 @@ A lightweight, text-based AI Dungeon Master. It narrates a D&D adventure for a c
 
 ## Context
 
-[dndgame](https://github.com/Smlcrp/dndgame) grew into a full MVC D&D 5e game — character builder, combat engine, XP/leveling, companions, Flask+JS web frontend, Electron shell, TTS — and became too much scope for one person, compounded by local GPU limits (a 6–7B Ollama model already strains an 8GB card).
+[dndgame](https://github.com/Smlcrp/dndgame) grew into a full MVC D&D 5e game — [character builder](https://github.com/Smlcrp/dndgame/tree/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/character_builder), [combat engine](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/combat.py), [XP/leveling](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/progression.py#L17-L20), [companions](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/companions.py#L219-L419), [Flask+JS web frontend](https://github.com/Smlcrp/dndgame/tree/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web), [Electron shell](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/electron/main.js#L16), [TTS](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/narrator.py) — and became too much scope for one person, compounded by local GPU limits (a 6–7B Ollama model already strains an 8GB card).
 
 DND Lite is a deliberate reset: a lightweight, text-based AI Dungeon Master. The player brings their own D&D character from outside the app (paper or D&D Beyond) and just plays — no character creation, no stat tracking, no combat engine, no leveling, no companions. v1 is a CLI where a local Ollama model narrates an adventure, the player self-reports dice rolls in plain language, and sessions save/resume to disk.
 
-A key design goal, adapted from concepts in dndgame: that project used 8 hand-written, fixed adventure templates — fine for a demo, but a repeat player would eventually recognize and memorize all 8, killing the surprise. The player also shouldn't have to hand-author their own plot (that would spoil it for themselves). The design below generates a different, hidden adventure skeleton every time, keeps it secret from the player (revealed only through play), and lets the story adapt when the player goes off-script.
+A key design goal, adapted from concepts in dndgame: that project used [8 hand-written, fixed adventure templates](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/adventure.py#L29-L206) — fine for a demo, but a repeat player would eventually recognize and memorize all 8, killing the surprise. The player also shouldn't have to hand-author their own plot (that would spoil it for themselves). The design below generates a different, hidden adventure skeleton every time, keeps it secret from the player (revealed only through play), and lets the story adapt when the player goes off-script.
 
 ## Design Plan
 
@@ -133,7 +133,7 @@ The adventure's own generated `title` (from the architect pass, once it runs) is
 
 ### Adventure building blocks & draft outline (`adventure.py`)
 
-Replaces dndgame's 8 fixed templates with independent random tables, so combinations vastly outnumber any hand-written set:
+Replaces dndgame's [8 fixed templates](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/adventure.py#L29-L206) with independent random tables, so combinations vastly outnumber any hand-written set:
 
 ```python
 SETTINGS = [...]              # e.g. "a flooded coastal ruin", "a mountain mining town", ...
@@ -171,7 +171,7 @@ Each table entry can optionally carry tone tags (e.g. an antagonist archetype ta
 
 #### Adventure length & pacing
 
-Adapted from concepts in dndgame's One Shot / Quest / Epic system, updated for the new randomized-outline design:
+Adapted from concepts in dndgame's [One Shot / Quest / Epic system](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/models/adventure.py#L212-L216), updated for the new randomized-outline design:
 
 - The preset picked at setup determines `total_beats` (1, 3, or 5) — this is the number of **acts** the architect writes into `adventure["beats"]`. The overall arc is always `HOOK → Act 1 … Act N → CLIMAX → RESOLUTION`; hook/climax/resolution are separate fields, not counted among the acts.
 - `adventure["current_beat"]` starts at `0` (still in the hook) and increments by 1 each time the DM emits `[BEAT]`, capped at `total_beats`. Reaching `total_beats` doesn't auto-trigger the climax — the DM decides when the story has earned it and emits `[CLIMAX]` explicitly.
@@ -304,7 +304,7 @@ History windowing: system prompt + last ~12 turns + current input.
 
 ### Explicit non-goals
 
-No combat engine, no character stats/HP, no companions, no XP/leveling, no TTS, no D&D Beyond import, no Flask/web/Electron, no provider-abstraction layer, no password/auth on profiles. A future web phase could reuse dndgame's SSE-streaming + live tag-filtering approach conceptually, but no scaffolding for it now.
+No combat engine, no character stats/HP, no companions, no XP/leveling, no TTS, no D&D Beyond import, no Flask/web/Electron, no provider-abstraction layer, no password/auth on profiles. A future web phase could reuse dndgame's [SSE-streaming](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/api.py#L375-L409) + [live tag-filtering](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/static/js/scenes/GameScene.js#L173-L190) approach conceptually, but no scaffolding for it now.
 
 ### Verification
 
