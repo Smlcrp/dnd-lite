@@ -8,6 +8,7 @@ def _draft():
         "tone": "Horror",
         "setting_archetype": "a flooded coastal ruin",
         "antagonist_archetype": "a cult leader promising false salvation",
+        "antagonist_archetype_key": "cult_leader",
         "antagonist_motivation": "convinced they are the only one who can prevent a catastrophe",
         "hook_type": "a stranger begs the party for help in a crowded public place",
         "twist_type": "someone the party trusted is working against them",
@@ -39,6 +40,7 @@ def test_build_adventure_parses_valid_json_on_first_try():
     assert result["total_beats"] == 3
     assert result["current_beat"] == 0
     assert result["adaptations"] == []
+    assert result["antagonist_archetype_key"] == "cult_leader"
 
 
 def test_build_adventure_strips_markdown_fences():
@@ -72,6 +74,7 @@ def test_build_adventure_falls_back_after_two_failures():
     assert result["current_beat"] == 0
     assert "name" in result["antagonist"]
     assert len(result["resolution_options"]) >= 1
+    assert result["antagonist_archetype_key"] == "cult_leader"
 
 
 def test_beats_padded_when_model_returns_too_few():

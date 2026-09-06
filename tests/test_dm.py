@@ -152,6 +152,8 @@ def test_parse_tags_strips_all_tags_and_extracts_events():
         "Something glints beneath the water.\n"
         "[BEAT]\n"
         "[ADAPT: The party's mercy toward the cultists earns them an ally.]\n"
+        "[STATUS: 8 HP, raging]\n"
+        "[ENCOUNTER: ogre bloodied]\n"
     )
     clean, events = d._parse_tags(raw)
 
@@ -159,10 +161,15 @@ def test_parse_tags_strips_all_tags_and_extracts_events():
     assert "[CHECK" not in clean
     assert "[BEAT]" not in clean
     assert "[ADAPT" not in clean
+    assert "[STATUS" not in clean
+    assert "[ENCOUNTER" not in clean
     assert "You step into the flooded nave." in clean
 
     types = {e["type"] for e in events}
-    assert types == {"scene_change", "check_requested", "beat_complete", "adapt"}
+    assert types == {
+        "scene_change", "check_requested", "beat_complete", "adapt",
+        "status_report", "encounter_update",
+    }
 
     scene_event = next(e for e in events if e["type"] == "scene_change")
     assert scene_event["location"] == "The Drowned Chapel"
@@ -271,6 +278,142 @@ def test_recap_with_no_history_returns_placeholder():
     d = dm.DungeonMaster()
     s = _sample_session(history=[])
     assert d.recap(s) == "No previous narration to recap."
+
+
+# ---- reference data injection ----
+
+def test_system_prompt_includes_reference_data_for_players_own_class_only():
+    d = dm.DungeonMaster()
+    s = session.empty_session("Sam", "Borin", ["Fighter"], 5, "gruff")
+    s["adventure"] = _sample_adventure()
+    prompt = d._build_system_prompt(s)
+
+    assert "FIGHTER COMBAT FEATURES" in prompt
+    assert "WIZARD SPELLS" not in prompt
+    assert "WEAPONS REFERENCE" in prompt
+    assert "CONDITIONS REFERENCE" in prompt
+    assert "DEATH & DYING" in prompt
+
+
+def test_system_prompt_includes_reference_data_for_all_13_classes():
+    # Ranger/Rogue were Phase 1's "unauthored" example -- now authored
+    # (Phase 2), their reference data should appear like any other class.
+    d = dm.DungeonMaster()
+    prompt = d._build_system_prompt(_sample_session())
+    assert "RANGER COMBAT FEATURES" in prompt
+    assert "ROGUE COMBAT FEATURES" in prompt
+
+
+def test_system_prompt_gracefully_omits_reference_data_for_unauthored_class():
+    # "Cavalier" isn't one of the 13 D&D classes this app supports -- must
+    # not crash or leave a stray empty block.
+    d = dm.DungeonMaster()
+    s = session.empty_session("Sam", "Test", ["Cavalier"], 5, "blurb")
+    s["adventure"] = _sample_adventure()
+    prompt = d._build_system_prompt(s)
+    assert "CAVALIER COMBAT FEATURES" not in prompt
+
+
+def test_system_prompt_wizard_gets_only_simple_weapons():
+    d = dm.DungeonMaster()
+    s = session.empty_session("Sam", "Elowen", ["Wizard"], 3, "curious")
+    s["adventure"] = _sample_adventure()
+    prompt = d._build_system_prompt(s)
+
+    assert "Dagger (Simple Melee)" in prompt
+    assert "Martial Melee" not in prompt
+
+
+def test_system_prompt_stays_bounded_in_size():
+    """Regression guard: reference data must be filtered before injection,
+    never dumped in full -- this is the whole point of the filtering
+    design. A generous ceiling, not a tight budget."""
+    d = dm.DungeonMaster()
+    s = session.empty_session("Sam", "Borin", ["Fighter", "Wizard"], 20, "veteran")
+    s["adventure"] = _sample_adventure()
+    prompt = d._build_system_prompt(s)
+    assert len(prompt) < 35000
+
+
+def test_system_prompt_stays_bounded_even_for_pathological_multiclass():
+    """Same guard as above, but for an unrealistic worst case (all 13
+    classes at once) -- confirms growth stays proportional as reference
+    data (esp. the spell list) keeps expanding in future phases."""
+    d = dm.DungeonMaster()
+    all_classes = [
+        "Artificer", "Barbarian", "Bard", "Cleric", "Druid", "Fighter",
+        "Monk", "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard",
+    ]
+    s = session.empty_session("Sam", "Borin", all_classes, 20, "veteran")
+    s["adventure"] = _sample_adventure()
+    prompt = d._build_system_prompt(s)
+    assert len(prompt) < 120000
+
+
+# ---- [STATUS:] / [ENCOUNTER:] tags ----
+
+def test_parse_tags_extracts_status_event():
+    d = dm.DungeonMaster()
+    raw = "[STATUS: 8 HP, raging, blessed]\nYou shake off the blow."
+    clean, events = d._parse_tags(raw)
+    assert "[STATUS" not in clean
+    status_event = next(e for e in events if e["type"] == "status_report")
+    assert status_event["note"] == "8 HP, raging, blessed"
+
+
+def test_parse_tags_extracts_encounter_event():
+    d = dm.DungeonMaster()
+    raw = "[ENCOUNTER: ogre bloodied, second bandit fled]\nThe fight continues."
+    clean, events = d._parse_tags(raw)
+    assert "[ENCOUNTER" not in clean
+    encounter_event = next(e for e in events if e["type"] == "encounter_update")
+    assert encounter_event["note"] == "ogre bloodied, second bandit fled"
+
+
+def test_apply_events_status_report_sets_flag():
+    d = dm.DungeonMaster()
+    s = _sample_session()
+    d._apply_events(s, [{"type": "status_report", "note": "8 HP, raging"}])
+    assert session.get_flag(s, "last_known_status") == "8 HP, raging"
+
+
+def test_apply_events_encounter_update_sets_flag():
+    d = dm.DungeonMaster()
+    s = _sample_session()
+    d._apply_events(s, [{"type": "encounter_update", "note": "ogre bloodied"}])
+    assert session.get_flag(s, "current_encounter_state") == "ogre bloodied"
+
+
+def test_system_prompt_surfaces_last_known_status_when_flag_set():
+    d = dm.DungeonMaster()
+    s = _sample_session()
+    session.set_flag(s, "last_known_status", "8 HP, raging")
+    prompt = d._build_system_prompt(s)
+    assert "LAST KNOWN PLAYER STATUS" in prompt
+    assert "8 HP, raging" in prompt
+
+
+def test_system_prompt_omits_status_line_when_flag_unset():
+    d = dm.DungeonMaster()
+    prompt = d._build_system_prompt(_sample_session())
+    assert "LAST KNOWN PLAYER STATUS" not in prompt
+
+
+def test_system_prompt_surfaces_encounter_state_when_flag_set():
+    d = dm.DungeonMaster()
+    s = _sample_session()
+    session.set_flag(s, "current_encounter_state", "ogre bloodied and enraged")
+    prompt = d._build_system_prompt(s)
+    assert "CURRENT ENCOUNTER STATE" in prompt
+    assert "ogre bloodied and enraged" in prompt
+
+
+def test_system_prompt_suppresses_encounter_state_when_none():
+    d = dm.DungeonMaster()
+    s = _sample_session()
+    session.set_flag(s, "current_encounter_state", "none")
+    prompt = d._build_system_prompt(s)
+    assert "CURRENT ENCOUNTER STATE" not in prompt
 
 
 def test_recap_calls_ollama_with_last_dm_turn():

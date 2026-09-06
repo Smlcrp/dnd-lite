@@ -2,7 +2,7 @@
 
 A lightweight, text-based AI Dungeon Master. It narrates a D&D adventure for a character you already have — no in-app character creation or stat management.
 
-**Status: implemented**, including accounts/login and character leveling. All modules described below are built, with 93 unit tests (Ollama mocked) and manually-verified end-to-end playthroughs against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
+**Status: implemented**, including accounts/login, character leveling, and a hand-built 5e reference dataset for narration precision. All modules described below are built, with 143 unit tests (Ollama mocked) and manually-verified end-to-end playthroughs against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
 
 ## Context
 
@@ -22,7 +22,7 @@ A key design goal, adapted from concepts in dndgame: that project used [8 hand-w
 - **Adventure generation**: randomized building blocks, reconciled into cohesive prose by a hidden one-time LLM "architect" call, with the DM able to adapt the plan mid-story via an explicit tag.
 - **Player input at setup**: character name + class(es) (multiclass-aware) + starting level (1–20) + a short freeform blurb, plus a broad tone/genre pick. No plot details are ever chosen by the player.
 - **Accounts**: multiple named accounts, each gated by a username + password (hashed, stdlib-only). Character details are asked fresh at the start of every new adventure — unless the account opted into a saved **default character** at creation time, which skips that prompt every time (used for the `test` account, but any account can opt in).
-- **D&D 5e knowledge**: no hand-built class/level reference data. The DM prompt tells the LLM it has full working 5e knowledge and to draw on that directly for flavor and encounter calibration — zero data tables, zero added token cost. A short 13-class name list validates input client-side only (never sent to the model).
+- **D&D 5e knowledge**: the DM prompt tells the LLM it has full working 5e knowledge and to draw on that directly for flavor and encounter calibration. A small, curated `reference/` module (weapons, conditions, death & dying, per-class level-by-level features/spell-slot tables, an SRD spell list, tier-based monster/NPC archetypes) supplements that with hand-maintained facts where precision beats fuzzy recall — every retrieval function filters to just the player's own class(es)/level/adventure before injection, never the full data set, so it stays narration grounding rather than a rules engine or a growing token cost. A short 13-class name list validates input client-side only (never sent to the model).
 - **Leveling**: narrated, not tracked. The player brings a starting level as a flavor/calibration snapshot; the DM may narrate level-ups paced like a real campaign, but the app never stores or recalculates a level number — the player's own physical/external character sheet stays authoritative, exactly like self-reported dice.
 
 ### File structure
@@ -31,9 +31,10 @@ A key design goal, adapted from concepts in dndgame: that project used [8 hand-w
 DND-Lite/
 ├── main.py            # entry point: python main.py
 ├── cli.py             # game loop, login/account-creation menus, streaming display
-├── dm.py              # DungeonMaster: main narration prompt, tag parsing (incl. [ADAPT:])
+├── dm.py              # DungeonMaster: main narration prompt, tag parsing (incl. [ADAPT:]/[STATUS:]/[ENCOUNTER:])
 ├── architect.py        # hidden one-time LLM call: reconciles random picks into a cohesive adventure skeleton
-├── adventure.py        # building-block tables, draft_outline(), adventure_prompt_block(), advance_beat(), apply_adaptation()
+├── adventure.py        # building-block tables, draft_outline(), adventure_prompt_block(), advance_beat(), apply_adaptation(), _tier_number()
+├── reference/           # hand-built 5e reference data (weapons, conditions, death & dying, per-class features/spell-slots, SRD spells by class, tier-based monster/NPC archetypes) -- every retrieval function filters to the player's own class(es)/level/adventure before injection
 ├── account.py           # account CRUD, login verification, default-character storage, adventure history (for repeat-avoidance)
 ├── auth.py              # password hashing/verification (stdlib pbkdf2_hmac, no new dependency)
 ├── ollama_client.py     # shared call_ollama()/warmup() used by dm.py and architect.py; resolves DEFAULT_MODEL (fallback / DND_LITE_MODEL env var)
@@ -47,8 +48,11 @@ DND-Lite/
 │   ├── test_auth.py
 │   ├── test_adventure.py
 │   ├── test_architect.py   # JSON parsing/fallback logic, Ollama mocked
-│   ├── test_cli.py         # login/account-creation flow, class/level validation, tag filter
-│   └── test_dm.py          # prompt assembly + tag parsing (incl. [ADAPT:]), Ollama mocked
+│   ├── test_cli.py         # login/account-creation flow, class/level validation, tag filter, resume status/encounter surfacing
+│   ├── test_dm.py          # prompt assembly + tag parsing (incl. [ADAPT:]/[STATUS:]/[ENCOUNTER:]), reference data injection + bounded prompt size, Ollama mocked
+│   ├── test_reference_classes.py   # per-class feature/spell-slot/weapon-proficiency filtering
+│   ├── test_reference_spells.py    # per-class spell filtering by accessible spell level
+│   └── test_reference_monsters.py  # tier bucketing, antagonist-key filtering/fallback, tier coverage
 ├── requirements.txt   # requests>=2.31.0, pytest>=7.0.0 — nothing else
 ├── .gitignore          # sessions/, accounts/, __pycache__/, *.pyc
 ├── CLAUDE.md
@@ -283,18 +287,21 @@ System prompt blocks, in order:
 
 1. **Absolute rule header** — never write the player's dialogue/decisions/emotions for them.
 2. **Character block** — name, **level**, classes (multiclass listed as-is), and blurb, at face value, no invented stats.
-3. **Narration rules** — second person, vivid, 3–5 sentences, end each turn at a choice point.
-4. **Player-agency rules** — never write the player's dialogue, emotions, or unstated decisions; always end at a natural pause.
-5. **Self-reported dice block** — qualitative bands, no DC spoken, no arithmetic (see below).
-6. **5e knowledge block** — tells the model it has full working D&D 5e knowledge (classes, leveling, class features) and should draw on that training directly for flavor and encounter calibration. No hand-built data — this is a couple of sentences, zero added token cost.
-7. **Encounter scaling block** — `dm._encounter_scaling_block(session["level"])`, injecting the concrete tier-of-play description (see "Tier-of-play scaling" above) plus an instruction to escalate the *truth* of the setting to match the tier rather than swapping in a mechanically-right-but-tonally-wrong threat.
-8. **Level progression block** — the DM may narrate level-ups paced like a real campaign ("should happen all the time," per design intent, just kept realistic), but this is flavor only: the app never stores or recalculates a level number. The player's own physical/external character sheet is authoritative, exactly like self-reported dice.
-9. **Tag rules** — the tag set below, including `[ADAPT:]`.
-10. **Adventure block** — `adventure.adventure_prompt_block(session["adventure"])`: the **original outline** (title/setting/hook/antagonist/beats/climax), the **current stage** (`stage_labels()` position + beat rules — don't rush, don't skip to the climax early, don't reveal climax/resolution), and, if any exist, a **live adaptations** section listed last and marked as authoritative over the original where they conflict.
-11. **Story Mode block** — only if `session["story_mode"]`.
-12. **Scene anchor** — last ~400 chars of the prior DM turn, truncated on a sentence boundary, "SCENE IN PROGRESS — DO NOT RESET." This is the key trick that keeps a small local model from losing the thread.
-13. **Opening vs. continuing instruction** — no history → open with the adventure hook + character blurb; scene anchor present → never re-establish setting.
-14. **Final reminder footer** — one-line reiteration of the absolute rule.
+3. **Last known status / encounter state** — only if set: the player's last self-reported `[STATUS:]` note, and the DM's own last `[ENCOUNTER:]` snapshot (suppressed once cleared to `"none"`). Continuity for both survives even if conversation history gets truncated.
+4. **Narration rules** — second person, vivid, 3–5 sentences, end each turn at a choice point.
+5. **Player-agency rules** — never write the player's dialogue, emotions, or unstated decisions; always end at a natural pause.
+6. **Self-reported dice block** — qualitative bands, no DC spoken, no arithmetic (see below).
+7. **5e knowledge block** — tells the model it has full working D&D 5e knowledge (classes, leveling, class features) and should draw on that training directly for flavor and encounter calibration, sharpened by the reference data below.
+8. **Encounter scaling block** — `dm._encounter_scaling_block(session["level"])`, injecting the concrete tier-of-play description (see "Tier-of-play scaling" above) plus an instruction to escalate the *truth* of the setting to match the tier rather than swapping in a mechanically-right-but-tonally-wrong threat.
+9. **Reference data guidance + blocks** — an instruction to use the following purely for narration precision (never read a stat block aloud, never quote an exact number/DC), then `reference.general_reference_block()` (weapons filtered by the player's class(es)' proficiencies, conditions, death & dying), `reference.class_features_block()` (the player's own class(es) only, filtered by level), `reference.spell_block()` (same filtering, casters only), and `reference.monster_block()` (the adventure's tier, narrowed to its antagonist archetype where possible) — each omitted entirely if empty.
+10. **Level progression block** — the DM may narrate level-ups paced like a real campaign ("should happen all the time," per design intent, just kept realistic), but this is flavor only: the app never stores or recalculates a level number. The player's own physical/external character sheet is authoritative, exactly like self-reported dice.
+11. **Status & encounter check-in guidance** — when to ask the player for a `[STATUS:]` report and when to emit a `[ENCOUNTER:]` snapshot (see the tag table below).
+12. **Tag rules** — the tag set below, including `[ADAPT:]`/`[STATUS:]`/`[ENCOUNTER:]`.
+13. **Adventure block** — `adventure.adventure_prompt_block(session["adventure"])`: the **original outline** (title/setting/hook/antagonist/beats/climax), the **current stage** (`stage_labels()` position + beat rules — don't rush, don't skip to the climax early, don't reveal climax/resolution), and, if any exist, a **live adaptations** section listed last and marked as authoritative over the original where they conflict.
+14. **Story Mode block** — only if `session["story_mode"]`.
+15. **Scene anchor** — last ~400 chars of the prior DM turn, truncated on a sentence boundary, "SCENE IN PROGRESS — DO NOT RESET." This is the key trick that keeps a small local model from losing the thread.
+16. **Opening vs. continuing instruction** — no history → open with the adventure hook + character blurb; scene anchor present → never re-establish setting.
+17. **Final reminder footer** — one-line reiteration of the absolute rule.
 
 No new tag or session/adventure state field was introduced for level-ups — deliberately. Continuity relies on the same history-window + scene-anchor mechanism already used for everything else, consistent with "shouldn't be tracked by the game."
 
@@ -318,10 +325,12 @@ The app has no character sheet, so it can't compute real DCs or apply modifiers.
 | `[CLIMAX]` | story reached final confrontation |
 | `[BREAK]` | natural session pause point |
 | `[ADAPT: short note]` | the player's choice meaningfully diverged from the planned direction; the enclosed 1–2 sentence note describes how the story now bends. Hidden from the player. Stripped from display and passed to `adventure.apply_adaptation()`, which appends it to `session["adventure"]["adaptations"]` so every future prompt sees the up-to-date direction. |
+| `[STATUS: short note]` | the player just self-reported a major state change (HP hit 0, a buff/condition landed, a limited resource spent), in their own words. Stored via `session.set_flag(session, "last_known_status", note)` — a text snapshot, never a tracked number — and surfaced back into every future system prompt (and on adventure resume) so continuity survives even if conversation history gets truncated. |
+| `[ENCOUNTER: short note]` | the DM's own snapshot of active enemy/combat state (an enemy bloodied, defeated, or fled), since — unlike the player — no physical sheet backs an enemy's state. Stored via `session.set_flag(session, "current_encounter_state", note)`, overwritten each time (never appended), cleared with `[ENCOUNTER: none]` once a fight resolves. |
 
-The prompt instructs the model to use `[ADAPT:]` sparingly — only on a genuine, meaningful divergence, not every minor choice — and to preserve the antagonist/theme where still plausible rather than discarding the whole outline.
+The prompt instructs the model to use `[ADAPT:]` sparingly — only on a genuine, meaningful divergence, not every minor choice — and to preserve the antagonist/theme where still plausible rather than discarding the whole outline. `[STATUS:]`/`[ENCOUNTER:]` are likewise reserved for major changes, not every minor scrape.
 
-Dropped (mechanics-only, not applicable here): `[COMBAT:]`, `[XP:]`, `[GOLD:]`, `[ITEM:]`, `[COMPANION:]`, `[ACTION:]`, `[BONUS:]`.
+Dropped (mechanics-only, imply the app tracks/derives state itself): `[COMBAT:]`, `[XP:]`, `[GOLD:]`, `[ITEM:]`, `[COMPANION:]`, `[ACTION:]`, `[BONUS:]`, `[HP:]`, `[DAMAGE:]`.
 
 History windowing: system prompt + last ~12 turns + current input.
 
@@ -371,11 +380,11 @@ Then the menu depends on whether the account has an unfinished adventure (`sessi
 
 ### Explicit non-goals
 
-No combat engine, no character stats/HP, no companions, no XP counter, no mechanical class-feature engine, no hand-built 5e reference data, no TTS, no D&D Beyond import, no Flask/web/Electron, no provider-abstraction layer, no password complexity rules or account lockout policy (unnecessary for a local single-player tool). Level is a stored *snapshot*, set once per adventure (or inherited from a default character) and never mechanically recalculated by this app. A future web phase could reuse dndgame's [SSE-streaming](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/api.py#L375-L409) + [live tag-filtering](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/static/js/scenes/GameScene.js#L173-L190) approach conceptually, but no scaffolding for it now.
+No combat engine, no character stats/HP, no companions, no XP counter, no mechanical class-feature engine that computes anything, no TTS, no D&D Beyond import, no Flask/web/Electron, no provider-abstraction layer, no password complexity rules or account lockout policy (unnecessary for a local single-player tool). Level is a stored *snapshot*, set once per adventure (or inherited from a default character) and never mechanically recalculated by this app. `reference/`'s hand-built 5e data (see above) is prompt scaffolding only -- static lookup text, filtered and injected as-is, never a rules engine and never used to compute a player's or monster's stats. A future web phase could reuse dndgame's [SSE-streaming](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/api.py#L375-L409) + [live tag-filtering](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/static/js/scenes/GameScene.js#L173-L190) approach conceptually, but no scaffolding for it now.
 
 ### Verification
 
-- `pytest tests/` — 93 unit tests pass (session/account persistence round-trips, password hashing, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`, login/account-creation flow, class/level validation) without a live Ollama server.
+- `pytest tests/` — 143 unit tests pass (session/account persistence round-trips, password hashing, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`/`[STATUS:]`/`[ENCOUNTER:]`, login/account-creation flow, class/level validation, `reference/`'s per-class/spell/monster filtering and bounded prompt size) without a live Ollama server.
 - Manual + real playtests per build-order step 11, all passing against a real local Ollama server.
 
 ## Running

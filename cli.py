@@ -253,6 +253,12 @@ def _resume_adventure(acct: dict, dungeon_master: dm.DungeonMaster) -> dict:
     s = session.load_active_session(acct["account_name"])
     print("\nPreviously...")
     print(dungeon_master.recap(s))
+    status = session.get_flag(s, "last_known_status")
+    if status:
+        print(f"(Last known status: {status})")
+    encounter = session.get_flag(s, "current_encounter_state")
+    if encounter and str(encounter).lower() != "none":
+        print(f"(Encounter in progress: {encounter})")
     print()
     return s
 

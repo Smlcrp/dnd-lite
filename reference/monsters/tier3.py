@@ -1,0 +1,77 @@
+"""Tier 3 (levels 11-16, "Masters of the Realm") curated monster/NPC
+archetypes. Bounded, curated set -- not a full SRD bestiary."""
+
+MONSTERS = [
+    {
+        "name": "Adult Dragon",
+        "ac": 19,
+        "hp": "256 (19d12+133)",
+        "attack": "+11 to hit, 2d10+7 (bite), plus a devastating breath weapon (recharges on 5-6) in a large area",
+        "signature_ability": "Legendary Actions: can take extra actions between other creatures' turns (a tail attack, a wing attack, detect).",
+        "antagonist_archetype_keys": ["defiant_general", "self_styled_prophet"],
+    },
+    {
+        "name": "Archmage",
+        "ac": 12,
+        "hp": "99 (18d8+18)",
+        "attack": "Casts disintegrate, cone of cold, or other high-level spells at will",
+        "signature_ability": "Magic Missile trap on death; keeps powerful defensive spells (mirror image, stoneskin) active.",
+        "antagonist_archetype_keys": ["spymaster", "corrupt_guild_master"],
+    },
+    {
+        "name": "Vampire",
+        "ac": 16,
+        "hp": "144 (17d8+68)",
+        "attack": "+9 to hit, 2d6+4 slashing (claws) or 1d6+4 piercing plus necrotic drain (bite)",
+        "signature_ability": "Shapechanger (mist/bat form), Regeneration, Charm gaze.",
+        "antagonist_archetype_keys": ["ancient_spirit", "cult_leader", "smuggler_king"],
+    },
+    {
+        "name": "Horned Devil",
+        "ac": 18,
+        "hp": "148 (17d10+51)",
+        "attack": "+8 to hit, 2d6+5 piercing (fork) plus 1d6 fire, or a hurled fire-laced spear",
+        "signature_ability": "Infernal command over lesser devils; immune to fire.",
+        "antagonist_archetype_keys": ["cult_leader"],
+    },
+    {
+        "name": "Death Knight",
+        "ac": 20,
+        "hp": "180 (19d8+95)",
+        "attack": "+11 to hit, 3d8+6 slashing (greatsword) plus necrotic, backed by fear-inducing dark magic",
+        "signature_ability": "Command Undead: forces nearby undead to obey; casts fear and hold person.",
+        "antagonist_archetype_keys": ["fallen_noble"],
+    },
+    {
+        "name": "Stone Golem",
+        "ac": 17,
+        "hp": "178 (17d10+85)",
+        "attack": "+11 to hit, 3d8+7 bludgeoning (slam), two attacks per round",
+        "signature_ability": "Immune to most spells; slow but relentless, resistant to nonmagical weapons.",
+        "antagonist_archetype_keys": ["corrupt_guild_master", "defiant_general"],
+    },
+    {
+        "name": "Lich",
+        "ac": 17,
+        "hp": "135 (18d8+54)",
+        "attack": "+12 to hit, paralyzing touch (3d6 cold) or high-level prepared spells",
+        "signature_ability": "Phylactery: destroying the body doesn't stop it permanently; immune to most conditions.",
+        "antagonist_archetype_keys": ["ancient_spirit", "cult_leader", "self_styled_prophet"],
+    },
+    {
+        "name": "Aboleth",
+        "ac": 17,
+        "hp": "135 (18d10+36)",
+        "attack": "+9 to hit, 2d6+5 slashing (tentacle, can infect with a memory-erasing disease)",
+        "signature_ability": "Enslave: charms up to three creatures with a telepathic dominating gaze.",
+        "antagonist_archetype_keys": ["plague_hivemind", "ancient_spirit"],
+    },
+    {
+        "name": "Fire Giant",
+        "ac": 18,
+        "hp": "162 (13d12+78)",
+        "attack": "+11 to hit, 3d6+7 bludgeoning (greatsword)",
+        "signature_ability": "None -- overwhelming raw strength and a disciplined warband.",
+        "antagonist_archetype_keys": ["defiant_general", "rival_mercenary_company"],
+    },
+]

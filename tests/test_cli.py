@@ -1,6 +1,7 @@
 import account
 import adventure
 import cli
+import session
 
 
 def _inputs(monkeypatch, values):
@@ -146,6 +147,57 @@ def test_collect_new_adventure_details_without_default_character_asks_level(monk
     assert classes == ["Ranger"]
     assert level == 4
     assert blurb == "cautious but kind"
+
+
+# ---- resume adventure: status/encounter continuity ----
+
+def _sample_adventure_dict():
+    return {
+        "title": "T", "tone": "Horror", "setting": "S", "hook": "H",
+        "antagonist": {"name": "N", "role": "R", "motivation": "M", "plan": "P"},
+        "beats": ["b1"], "climax": "C", "resolution_options": ["R1"],
+        "adaptations": [], "total_beats": 1, "current_beat": 0,
+    }
+
+
+def test_resume_adventure_prints_status_and_encounter_when_set(capsys):
+    a = account.create_account("Sam", "hunter2")
+    s = session.empty_session("Sam", "Kessa", ["Ranger"], 3, "cautious")
+    s["adventure"] = _sample_adventure_dict()
+    session.set_flag(s, "last_known_status", "8 HP, raging")
+    session.set_flag(s, "current_encounter_state", "ogre bloodied")
+    session.save_session(s)
+
+    cli._resume_adventure(a, cli.dm.DungeonMaster())
+
+    out = capsys.readouterr().out
+    assert "Last known status: 8 HP, raging" in out
+    assert "Encounter in progress: ogre bloodied" in out
+
+
+def test_resume_adventure_omits_status_and_encounter_when_unset(capsys):
+    a = account.create_account("Sam", "hunter2")
+    s = session.empty_session("Sam", "Kessa", ["Ranger"], 3, "cautious")
+    s["adventure"] = _sample_adventure_dict()
+    session.save_session(s)
+
+    cli._resume_adventure(a, cli.dm.DungeonMaster())
+
+    out = capsys.readouterr().out
+    assert "Last known status" not in out
+    assert "Encounter in progress" not in out
+
+
+def test_resume_adventure_suppresses_encounter_state_when_none(capsys):
+    a = account.create_account("Sam", "hunter2")
+    s = session.empty_session("Sam", "Kessa", ["Ranger"], 3, "cautious")
+    s["adventure"] = _sample_adventure_dict()
+    session.set_flag(s, "current_encounter_state", "none")
+    session.save_session(s)
+
+    cli._resume_adventure(a, cli.dm.DungeonMaster())
+
+    assert "Encounter in progress" not in capsys.readouterr().out
 
 
 # ---- main() orchestration ----

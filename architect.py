@@ -196,5 +196,6 @@ def build_adventure(
 
     parsed["total_beats"] = n_beats
     parsed["current_beat"] = 0
+    parsed["antagonist_archetype_key"] = draft["antagonist_archetype_key"]
     parsed.setdefault("adaptations", [])
     return parsed

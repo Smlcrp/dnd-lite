@@ -6,6 +6,7 @@ import re
 
 import adventure
 import ollama_client
+import reference
 import session as session_module
 
 HISTORY_WINDOW = 12
@@ -83,7 +84,16 @@ TAG_RULES = (
     "diverged from the planned direction; describe how the story now bends. "
     "Use this SPARINGLY -- only for genuine, meaningful divergence, not "
     "every minor choice -- and preserve the antagonist and theme where "
-    "still plausible rather than discarding the whole outline."
+    "still plausible rather than discarding the whole outline.\n"
+    "  [STATUS: free-text note] -- the player just self-reported a major "
+    "state change (HP hit 0, a buff/condition landed, a limited resource "
+    "was spent) after you asked them directly; record their own words, "
+    "never invented or computed by you.\n"
+    "  [ENCOUNTER: free-text note] -- snapshot the CURRENT state of any "
+    "active fight in your own words (an enemy bloodied, defeated, or fled; "
+    "a new enemy joined). OVERWRITE the previous snapshot each time rather "
+    "than appending to it, and once combat fully resolves emit "
+    "[ENCOUNTER: none] so a stale note doesn't confuse a much later turn."
 )
 
 FIFTH_EDITION_KNOWLEDGE_BLOCK = (
@@ -92,8 +102,40 @@ FIFTH_EDITION_KNOWLEDGE_BLOCK = (
     "each level. Draw on that knowledge directly: flavor the character's "
     "actions and options the way a real level-appropriate member of their "
     "class would act, and calibrate the danger and tone of encounters to "
-    "their level. This app stores no class or level data of its own -- you "
-    "are the source of that knowledge."
+    "their level. A small hand-built reference dataset below sharpens "
+    "specific facts (weapons, conditions, class features, spells, monster "
+    "stats) where precision beats fuzzy recall -- it is narration grounding "
+    "only, never a visible rules layer, and it is always filtered to just "
+    "this character and this adventure, never dumped in full."
+)
+
+REFERENCE_DATA_GUIDANCE = (
+    "REFERENCE DATA (below): concrete 5e facts for your OWN narration "
+    "precision -- weapon damage, condition effects, class features, spell "
+    "effects, monster stats. Use these to ground details naturally (a "
+    "longsword's edge, what Rage grants at this level, a bandit captain's "
+    "parry) -- NEVER read a stat block aloud, NEVER quote an exact number "
+    "or rule to the player as if it were a DC (e.g. \"that's +1d4 from "
+    "Bless\"), and NEVER let this override the SELF-REPORTED DICE bands "
+    "above."
+)
+
+STATUS_AND_ENCOUNTER_BLOCK = (
+    "STATUS & ENCOUNTER CHECK-INS: this app tracks no HP or resources as "
+    "numbers -- the player's own sheet is authoritative for their "
+    "character, and you are the only source of truth for enemies.\n"
+    "- PLAYER STATUS: when something major happens to the player character "
+    "(drops to 0 HP, a significant buff/condition lands, a big limited "
+    "resource like their last spell slot or Rage is spent), ask them "
+    "directly what their sheet now shows. Once they answer in their own "
+    "words, emit [STATUS: their words, briefly].\n"
+    "- ENCOUNTER STATE: during a fight, snapshot enemy state in your own "
+    "words at meaningful moments (an enemy roughly half health, defeated, "
+    "or fled; a new enemy arrives) with [ENCOUNTER: ...]. Always overwrite "
+    "the previous note, never append to it, and emit [ENCOUNTER: none] "
+    "once the fight is fully over.\n"
+    "Never invent or compute either -- only record what has just been "
+    "established, and don't overuse these -- major changes only."
 )
 
 def _encounter_scaling_block(level: int) -> str:
@@ -165,12 +207,32 @@ class DungeonMaster:
             f'a level {session["level"]} {classes_text}. "{session["blurb"]}"'
         )
 
+        last_status = session_module.get_flag(session, "last_known_status")
+        if last_status:
+            blocks.append(f"LAST KNOWN PLAYER STATUS (self-reported, may be stale): {last_status}")
+
+        encounter_state = session_module.get_flag(session, "current_encounter_state")
+        if encounter_state and str(encounter_state).lower() != "none":
+            blocks.append(f"CURRENT ENCOUNTER STATE (your own last snapshot): {encounter_state}")
+
         blocks.append(NARRATION_RULES)
         blocks.append(PLAYER_AGENCY_RULES)
         blocks.append(SELF_REPORTED_DICE_BLOCK)
         blocks.append(FIFTH_EDITION_KNOWLEDGE_BLOCK)
         blocks.append(_encounter_scaling_block(session["level"]))
+        blocks.append(REFERENCE_DATA_GUIDANCE)
+        blocks.append(reference.general_reference_block(session["classes"]))
+        class_block = reference.class_features_block(session["classes"], session["level"])
+        if class_block:
+            blocks.append(class_block)
+        spell_block = reference.spell_block(session["classes"], session["level"])
+        if spell_block:
+            blocks.append(spell_block)
+        monster_block = reference.monster_block(session["level"], session["adventure"])
+        if monster_block:
+            blocks.append(monster_block)
         blocks.append(LEVEL_PROGRESSION_BLOCK)
+        blocks.append(STATUS_AND_ENCOUNTER_BLOCK)
         blocks.append(TAG_RULES)
         blocks.append(adventure.adventure_prompt_block(session["adventure"]))
 
@@ -217,6 +279,10 @@ class DungeonMaster:
             events.append({"type": "check_requested", "skill": m.group(1).strip()})
         for m in re.finditer(r"\[ADAPT:\s*([^\]]+)\]", raw_text, re.IGNORECASE):
             events.append({"type": "adapt", "note": m.group(1).strip()})
+        for m in re.finditer(r"\[STATUS:\s*([^\]]+)\]", raw_text, re.IGNORECASE):
+            events.append({"type": "status_report", "note": m.group(1).strip()})
+        for m in re.finditer(r"\[ENCOUNTER:\s*([^\]]+)\]", raw_text, re.IGNORECASE):
+            events.append({"type": "encounter_update", "note": m.group(1).strip()})
         if re.search(r"\[BEAT\]", raw_text, re.IGNORECASE):
             events.append({"type": "beat_complete"})
         if re.search(r"\[CLIMAX\]", raw_text, re.IGNORECASE):
@@ -224,7 +290,7 @@ class DungeonMaster:
         if re.search(r"\[BREAK\]", raw_text, re.IGNORECASE):
             events.append({"type": "break_suggested"})
 
-        clean = re.sub(r"\[(SCENE|CHECK|ADAPT):[^\]]*\]", "", raw_text, flags=re.IGNORECASE)
+        clean = re.sub(r"\[(SCENE|CHECK|ADAPT|STATUS|ENCOUNTER):[^\]]*\]", "", raw_text, flags=re.IGNORECASE)
         clean = re.sub(r"\[(BEAT|CLIMAX|BREAK)\]", "", clean, flags=re.IGNORECASE)
         clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
         return clean, events
@@ -237,6 +303,10 @@ class DungeonMaster:
                 adventure.advance_beat(session["adventure"])
             elif event["type"] == "adapt":
                 adventure.apply_adaptation(session["adventure"], event["note"])
+            elif event["type"] == "status_report":
+                session_module.set_flag(session, "last_known_status", event["note"])
+            elif event["type"] == "encounter_update":
+                session_module.set_flag(session, "current_encounter_state", event["note"])
             # check_requested / break_suggested: no state mutation in v1;
             # the CLI may surface them to the player directly.
 

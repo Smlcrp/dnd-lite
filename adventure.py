@@ -32,17 +32,23 @@ SETTINGS = [
     ("a royal court in mourning", ["Political Intrigue", "Mystery"]),
 ]
 
+
+# Each entry: (key, text, [tone tags]). The key is a stable machine-readable
+# identifier (never shown to the LLM or player) that reference/monsters.py
+# uses to pick tier-appropriate monster archetypes for this antagonist --
+# matching on `text` directly would break the moment architect.py's LLM call
+# reconciles/paraphrases it into prose.
 ANTAGONIST_ARCHETYPES = [
-    ("a fallen noble seeking to reclaim their title", ["Political Intrigue", "Classic Fantasy"]),
-    ("a cult leader promising false salvation", ["Horror", "Classic Fantasy"]),
-    ("a rival mercenary company", ["Heist", "Survival"]),
-    ("a corrupt guild master", ["Political Intrigue", "Heist"]),
-    ("an ancient spirit bound to the land", ["Horror", "Mystery"]),
-    ("a spymaster playing every side", ["Political Intrigue", "Mystery"]),
-    ("a plague-touched hivemind", ["Horror", "Survival"]),
-    ("a self-styled prophet with a growing following", ["Horror", "Classic Fantasy"]),
-    ("a smuggler king protecting a secret", ["Heist", "Mystery"]),
-    ("a general who refuses to accept defeat", ["Classic Fantasy", "Survival"]),
+    ("fallen_noble", "a fallen noble seeking to reclaim their title", ["Political Intrigue", "Classic Fantasy"]),
+    ("cult_leader", "a cult leader promising false salvation", ["Horror", "Classic Fantasy"]),
+    ("rival_mercenary_company", "a rival mercenary company", ["Heist", "Survival"]),
+    ("corrupt_guild_master", "a corrupt guild master", ["Political Intrigue", "Heist"]),
+    ("ancient_spirit", "an ancient spirit bound to the land", ["Horror", "Mystery"]),
+    ("spymaster", "a spymaster playing every side", ["Political Intrigue", "Mystery"]),
+    ("plague_hivemind", "a plague-touched hivemind", ["Horror", "Survival"]),
+    ("self_styled_prophet", "a self-styled prophet with a growing following", ["Horror", "Classic Fantasy"]),
+    ("smuggler_king", "a smuggler king protecting a secret", ["Heist", "Mystery"]),
+    ("defiant_general", "a general who refuses to accept defeat", ["Classic Fantasy", "Survival"]),
 ]
 
 ANTAGONIST_MOTIVATIONS = [
@@ -119,18 +125,52 @@ def _pick(table, tone, account, field_name):
     return random.choice(candidates)
 
 
+def _pick_keyed(table, tone, account, field_name):
+    """Like _pick, but for (key, text, tags) tables -- returns (key, text).
+    Recent-pick exclusion still matches on `text`, consistent with how
+    account history entries store this field."""
+    candidates = [(key, text) for key, text, tags in table if tone in tags] or \
+        [(key, text) for key, text, _ in table]
+
+    if account is not None:
+        recent = set(account_module.recent_picks(account, field_name))
+        filtered = [c for c in candidates if c[1] not in recent]
+        if filtered:
+            candidates = filtered
+
+    return random.choice(candidates)
+
+
 def draft_outline(tone: str, account: dict = None) -> dict:
     """Randomly pick one entry per table, filtered by tone and excluding this
     account's recent picks. Returns raw picks only — no prose, no LLM call."""
+    antagonist_archetype_key, antagonist_archetype = _pick_keyed(
+        ANTAGONIST_ARCHETYPES, tone, account, "antagonist_archetype"
+    )
     return {
         "tone": tone,
         "setting_archetype": _pick(SETTINGS, tone, account, "setting_archetype"),
-        "antagonist_archetype": _pick(ANTAGONIST_ARCHETYPES, tone, account, "antagonist_archetype"),
+        "antagonist_archetype": antagonist_archetype,
+        "antagonist_archetype_key": antagonist_archetype_key,
         "antagonist_motivation": random.choice(ANTAGONIST_MOTIVATIONS),
         "hook_type": random.choice(HOOK_TYPES),
         "twist_type": random.choice(TWIST_TYPES),
         "climax_type": random.choice(CLIMAX_TYPES),
     }
+
+
+def _tier_number(level: int) -> int:
+    """D&D 5e's four tiers of play, as a bare 1-4 number. Shared with
+    reference/monsters.py so tier boundaries can't drift between the two
+    modules -- level_tier_description() below is the only place the
+    boundaries themselves are defined."""
+    if level <= 4:
+        return 1
+    if level <= 10:
+        return 2
+    if level <= 16:
+        return 3
+    return 4
 
 
 def level_tier_description(level: int) -> str:
@@ -139,20 +179,21 @@ def level_tier_description(level: int) -> str:
     for the level' instruction. This is guidance text only -- no mechanical
     CR/XP math, consistent with relying on the model's own 5e training
     rather than hand-built reference data."""
-    if level <= 4:
+    tier = _tier_number(level)
+    if tier == 1:
         return (
             'Tier 1 ("Local Heroes", levels 1-4): threats are personal-scale '
             "-- bandits, cultists, wild beasts, a single dangerous "
             "individual. No legendary creatures, no significant magic "
             "items, no stakes beyond a town or a handful of lives."
         )
-    if level <= 10:
+    if tier == 2:
         return (
             'Tier 2 ("Heroes of the Realm", levels 5-10): real magic and '
             "monsters enter play -- ogres, hags, young dragons, powerful "
             "spellcasters. Stakes can affect a town, city, or region."
         )
-    if level <= 16:
+    if tier == 3:
         return (
             'Tier 3 ("Masters of the Realm", levels 11-16): legendary '
             "creatures and formidable magic are in play -- adult or ancient "

@@ -29,6 +29,7 @@ def test_draft_outline_has_all_fields():
         "tone",
         "setting_archetype",
         "antagonist_archetype",
+        "antagonist_archetype_key",
         "antagonist_motivation",
         "hook_type",
         "twist_type",
@@ -37,6 +38,15 @@ def test_draft_outline_has_all_fields():
         assert field in outline
         assert isinstance(outline[field], str)
         assert outline[field]
+
+
+def test_draft_outline_antagonist_archetype_key_matches_text():
+    outline = adventure.draft_outline("Horror")
+    matches = [
+        key for key, text, tags in adventure.ANTAGONIST_ARCHETYPES
+        if text == outline["antagonist_archetype"]
+    ]
+    assert outline["antagonist_archetype_key"] in matches
 
 
 def test_draft_outline_respects_tone_tags():
@@ -51,7 +61,7 @@ def test_draft_outline_respects_tone_tags():
 def test_draft_outline_excludes_recent_picks_when_possible():
     a = account.create_account("Sam", "hunter2")
     # Exhaust all but one Horror-tagged antagonist archetype as "recent".
-    horror_archetypes = [text for text, tags in adventure.ANTAGONIST_ARCHETYPES if "Horror" in tags]
+    horror_archetypes = [text for key, text, tags in adventure.ANTAGONIST_ARCHETYPES if "Horror" in tags]
     for archetype in horror_archetypes[:-1]:
         account.start_new_adventure(a, {"antagonist_archetype": archetype})
         account.complete_current_adventure(a)
@@ -62,7 +72,7 @@ def test_draft_outline_excludes_recent_picks_when_possible():
 
 def test_draft_outline_falls_back_when_all_recent():
     a = account.create_account("Sam", "hunter2")
-    horror_archetypes = [text for text, tags in adventure.ANTAGONIST_ARCHETYPES if "Horror" in tags]
+    horror_archetypes = [text for key, text, tags in adventure.ANTAGONIST_ARCHETYPES if "Horror" in tags]
     for archetype in horror_archetypes:
         account.start_new_adventure(a, {"antagonist_archetype": archetype})
         account.complete_current_adventure(a)
@@ -127,6 +137,17 @@ def test_level_tier_description_boundaries():
     assert "Tier 3" in adventure.level_tier_description(16)
     assert "Tier 4" in adventure.level_tier_description(17)
     assert "Tier 4" in adventure.level_tier_description(20)
+
+
+def test_tier_number_boundaries():
+    assert adventure._tier_number(1) == 1
+    assert adventure._tier_number(4) == 1
+    assert adventure._tier_number(5) == 2
+    assert adventure._tier_number(10) == 2
+    assert adventure._tier_number(11) == 3
+    assert adventure._tier_number(16) == 3
+    assert adventure._tier_number(17) == 4
+    assert adventure._tier_number(20) == 4
 
 
 def test_presets_shape():
