@@ -1,12 +1,19 @@
 """Terminal game loop for DND Lite."""
 
+import getpass
 import re
 
+import account
 import adventure
 import architect
 import dm
-import profile
 import session
+
+CLASSES = [
+    "Artificer", "Barbarian", "Bard", "Cleric", "Druid", "Fighter", "Monk",
+    "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard",
+]
+_CLASSES_BY_LOWER = {c.lower(): c for c in CLASSES}
 
 
 class _TagFilter:
@@ -67,26 +74,93 @@ def _choose_from_list(options: list, label: str, describe=None) -> str:
         print("Please enter a valid number.")
 
 
-def _pick_profile() -> dict:
+def _prompt_classes() -> list:
+    while True:
+        raw = _prompt("Class(es) (e.g. 'Fighter' or 'Fighter/Rogue' for multiclass): ")
+        parts = [c.strip() for c in re.split(r"[/,]", raw) if c.strip()]
+        if not parts:
+            print("Please enter at least one class.")
+            continue
+        resolved = []
+        bad = None
+        for part in parts:
+            canonical = _CLASSES_BY_LOWER.get(part.lower())
+            if canonical is None:
+                bad = part
+                break
+            resolved.append(canonical)
+        if bad is not None:
+            print(f"'{bad}' isn't one of the 13 D&D 5e classes ({', '.join(CLASSES)}). Try again.")
+            continue
+        return resolved
+
+
+def _prompt_level() -> int:
+    while True:
+        raw = _prompt("Starting level (1-20): ")
+        if raw.isdigit() and 1 <= int(raw) <= 20:
+            return int(raw)
+        print("Please enter a number from 1 to 20.")
+
+
+def _create_account_flow(name: str) -> dict:
+    while True:
+        password = getpass.getpass("Choose a password: ")
+        if not password:
+            print("Password cannot be empty.")
+            continue
+        confirm_password = getpass.getpass("Confirm password: ")
+        if password != confirm_password:
+            print("Passwords didn't match.")
+            continue
+        break
+
+    acct = account.create_account(name, password)
+
+    if _confirm("Save a default character for this account, so you skip character setup on every adventure?"):
+        character_name = _prompt("Character name: ")
+        while not character_name:
+            character_name = _prompt("Character name: ")
+        classes = _prompt_classes()
+        level = _prompt_level()
+        blurb = _prompt("Describe your character in a sentence or two: ")
+        account.set_default_character(acct, character_name, classes, level, blurb)
+
+    account.save_account(acct)
+    print(f"Account '{name}' created.")
+    return acct
+
+
+def _login_or_create_account() -> dict:
     print("DND Lite")
     print("========")
-    existing = profile.list_profiles()
+    existing = account.list_accounts()
     if existing:
-        print("Existing profiles:", ", ".join(existing))
-    name = _prompt("Enter your profile name (new or existing): ")
-    while not name:
-        name = _prompt("Please enter a name: ")
-    try:
-        return profile.load_profile(name)
-    except FileNotFoundError:
-        p = profile.create_profile(name)
-        profile.save_profile(p)
-        print(f"Created new profile '{name}'.")
-        return p
+        print("Existing accounts:", ", ".join(existing))
+
+    while True:
+        name = _prompt("Account name: ")
+        if not name:
+            continue
+
+        try:
+            acct = account.load_account(name)
+        except FileNotFoundError:
+            if _confirm(f"No account named '{name}' -- create one?"):
+                return _create_account_flow(name)
+            continue
+
+        while True:
+            password = getpass.getpass("Password: ")
+            if account.verify_login(acct, password):
+                return acct
+            print("Incorrect password.")
+            if not _confirm("Try again?"):
+                break
 
 
-def _startup_menu(prof: dict) -> str:
-    entry = profile.current_adventure_entry(prof)
+def _startup_menu(acct: dict) -> str:
+    entry = account.current_adventure_entry(acct)
     if entry is not None:
         title = entry.get("title", "your adventure")
         started = entry.get("started_at", "an earlier session")
@@ -107,15 +181,24 @@ def _startup_menu(prof: dict) -> str:
     return "new" if _prompt("> ") == "1" else "quit"
 
 
-def _collect_new_adventure_details() -> tuple:
-    character_name = _prompt("\nCharacter name: ")
-    while not character_name:
-        character_name = _prompt("Character name: ")
-
-    classes_raw = _prompt("Class(es) (e.g. 'Ranger' or 'Ranger/Rogue' for multiclass): ")
-    classes = [c.strip() for c in re.split(r"[/,]", classes_raw) if c.strip()] or ["Adventurer"]
-
-    blurb = _prompt("Describe your character in a sentence or two: ")
+def _collect_new_adventure_details(acct: dict) -> tuple:
+    default_character = account.get_default_character(acct)
+    if default_character is not None:
+        character_name = default_character["name"]
+        classes = default_character["classes"]
+        level = default_character["level"]
+        blurb = default_character["blurb"]
+        print(
+            f"\nUsing your saved character: {character_name} the "
+            f"{'/'.join(classes)} (Level {level})"
+        )
+    else:
+        character_name = _prompt("\nCharacter name: ")
+        while not character_name:
+            character_name = _prompt("Character name: ")
+        classes = _prompt_classes()
+        level = _prompt_level()
+        blurb = _prompt("Describe your character in a sentence or two: ")
 
     tone = _choose_from_list(adventure.TONES, "Tone")
     preset = _choose_from_list(
@@ -124,24 +207,25 @@ def _collect_new_adventure_details() -> tuple:
         describe=lambda name: f"{adventure.PRESETS[name]['estimate']} -- {adventure.PRESETS[name]['blurb']}",
     )
 
-    return character_name, classes, blurb, tone, preset
+    return character_name, classes, level, blurb, tone, preset
 
 
-def _start_new_adventure(prof: dict, dungeon_master: dm.DungeonMaster) -> dict:
-    character_name, classes, blurb, tone, preset = _collect_new_adventure_details()
+def _start_new_adventure(acct: dict, dungeon_master: dm.DungeonMaster) -> dict:
+    character_name, classes, level, blurb, tone, preset = _collect_new_adventure_details(acct)
 
-    draft = adventure.draft_outline(tone, prof)
+    draft = adventure.draft_outline(tone, acct)
     print("\nThe DM is preparing your adventure...")
     full_adventure = architect.build_adventure(
         draft, character_name, classes, blurb, preset, model=dungeon_master.model
     )
 
-    session.delete_session(prof["profile_name"])
+    session.delete_session(acct["account_name"])
 
     entry = {
         "title": full_adventure["title"],
         "character_name": character_name,
         "classes": classes,
+        "level": level,
         "blurb": blurb,
         "tone": tone,
         "setting_archetype": draft["setting_archetype"],
@@ -150,9 +234,9 @@ def _start_new_adventure(prof: dict, dungeon_master: dm.DungeonMaster) -> dict:
         "twist_type": draft["twist_type"],
         "climax_type": draft["climax_type"],
     }
-    profile.start_new_adventure(prof, entry)
+    account.start_new_adventure(acct, entry)
 
-    s = session.empty_session(prof["profile_name"], character_name, classes, blurb)
+    s = session.empty_session(acct["account_name"], character_name, classes, level, blurb)
     s["adventure"] = full_adventure
     session.save_session(s)
 
@@ -165,22 +249,22 @@ def _start_new_adventure(prof: dict, dungeon_master: dm.DungeonMaster) -> dict:
     return s
 
 
-def _resume_adventure(prof: dict, dungeon_master: dm.DungeonMaster) -> dict:
-    s = session.load_active_session(prof["profile_name"])
+def _resume_adventure(acct: dict, dungeon_master: dm.DungeonMaster) -> dict:
+    s = session.load_active_session(acct["account_name"])
     print("\nPreviously...")
     print(dungeon_master.recap(s))
     print()
     return s
 
 
-def _maybe_complete_adventure(prof: dict, s: dict, event_types: set) -> None:
+def _maybe_complete_adventure(acct: dict, s: dict, event_types: set) -> None:
     if "climax_reached" in event_types:
         session.set_flag(s, "climax_reached")
     if session.get_flag(s, "climax_reached") and "break_suggested" in event_types:
-        profile.complete_current_adventure(prof)
+        account.complete_current_adventure(acct)
 
 
-def _main_loop(prof: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
+def _main_loop(acct: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
     print("Type your actions. Commands: 'save', 'quit'.\n")
     while True:
         try:
@@ -188,7 +272,7 @@ def _main_loop(prof: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
         except (EOFError, KeyboardInterrupt):
             print("\nSaving and exiting...")
             if session.get_flag(s, "climax_reached"):
-                profile.complete_current_adventure(prof)
+                account.complete_current_adventure(acct)
             session.save_session(s)
             break
 
@@ -198,7 +282,7 @@ def _main_loop(prof: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
         lower = player_input.lower()
         if lower in ("quit", "exit"):
             if session.get_flag(s, "climax_reached"):
-                profile.complete_current_adventure(prof)
+                account.complete_current_adventure(acct)
             session.save_session(s)
             print("Saved. See you next time.")
             break
@@ -214,7 +298,7 @@ def _main_loop(prof: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
             continue
 
         event_types = {e["type"] for e in events}
-        _maybe_complete_adventure(prof, s, event_types)
+        _maybe_complete_adventure(acct, s, event_types)
         session.save_session(s)
 
         if "break_suggested" in event_types:
@@ -222,27 +306,27 @@ def _main_loop(prof: dict, s: dict, dungeon_master: dm.DungeonMaster) -> None:
 
 
 def main(model: str = None) -> None:
-    prof = _pick_profile()
+    acct = _login_or_create_account()
     dungeon_master = dm.DungeonMaster(model) if model else dm.DungeonMaster()
     if model:
         print(f"(using model: {model})")
 
-    action = _startup_menu(prof)
+    action = _startup_menu(acct)
     if action == "quit":
         print("Goodbye.")
         return
 
     try:
         if action == "new":
-            s = _start_new_adventure(prof, dungeon_master)
+            s = _start_new_adventure(acct, dungeon_master)
         else:
-            s = _resume_adventure(prof, dungeon_master)
+            s = _resume_adventure(acct, dungeon_master)
     except RuntimeError as e:
         print(f"\n[DM error: {e}]")
         print("Make sure 'ollama serve' is running (and the model is pulled), then try again.")
         return
 
-    _main_loop(prof, s, dungeon_master)
+    _main_loop(acct, s, dungeon_master)
 
 
 if __name__ == "__main__":

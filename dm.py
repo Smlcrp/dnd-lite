@@ -86,6 +86,27 @@ TAG_RULES = (
     "still plausible rather than discarding the whole outline."
 )
 
+FIFTH_EDITION_KNOWLEDGE_BLOCK = (
+    "5E KNOWLEDGE: you have full working knowledge of Dungeons & Dragons 5th "
+    "edition -- classes, leveling, class features, typical capabilities at "
+    "each level. Draw on that knowledge directly: flavor the character's "
+    "actions and options the way a real level-appropriate member of their "
+    "class would act, and calibrate the danger and tone of encounters to "
+    "their level. This app stores no class or level data of its own -- you "
+    "are the source of that knowledge."
+)
+
+LEVEL_PROGRESSION_BLOCK = (
+    "LEVEL PROGRESSION: you may narrate the character leveling up when the "
+    "story's events warrant it, paced the way a real D&D campaign advances "
+    "(roughly every session or major milestone, not every turn) -- do not "
+    "be shy about it, but keep the pacing realistic. This is flavor only: "
+    "the app does not track XP or store an updated level number. The "
+    "player's own physical or external character sheet is the authoritative "
+    "record, exactly like self-reported dice rolls -- treat any level-up as "
+    "theirs to record, not yours to tally."
+)
+
 FINAL_REMINDER = (
     "Reminder: never write the player's dialogue, decisions, or emotions "
     "for them. Narrate, then stop."
@@ -122,12 +143,14 @@ class DungeonMaster:
         blocks.append(
             "PLAYER CHARACTER (as described by the player -- take this at "
             f'face value, do not invent stats): {session["character_name"]}, '
-            f'{classes_text}. "{session["blurb"]}"'
+            f'a level {session["level"]} {classes_text}. "{session["blurb"]}"'
         )
 
         blocks.append(NARRATION_RULES)
         blocks.append(PLAYER_AGENCY_RULES)
         blocks.append(SELF_REPORTED_DICE_BLOCK)
+        blocks.append(FIFTH_EDITION_KNOWLEDGE_BLOCK)
+        blocks.append(LEVEL_PROGRESSION_BLOCK)
         blocks.append(TAG_RULES)
         blocks.append(adventure.adventure_prompt_block(session["adventure"]))
 

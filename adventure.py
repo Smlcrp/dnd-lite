@@ -7,7 +7,7 @@ only produces the raw picks and tracks pacing state — no LLM calls here.
 
 import random
 
-import profile as profile_module
+import account as account_module
 
 TONES = [
     "Classic Fantasy",
@@ -104,14 +104,14 @@ PRESETS = {
 }
 
 
-def _pick(table, tone, profile, field_name):
+def _pick(table, tone, account, field_name):
     """Pick one entry from a (text, tags) table, preferring entries tagged for
-    `tone` and excluding this profile's recent picks for `field_name` when
+    `tone` and excluding this account's recent picks for `field_name` when
     possible. Falls back to the full table if filtering leaves nothing."""
     candidates = [text for text, tags in table if tone in tags] or [text for text, _ in table]
 
-    if profile is not None:
-        recent = set(profile_module.recent_picks(profile, field_name))
+    if account is not None:
+        recent = set(account_module.recent_picks(account, field_name))
         filtered = [c for c in candidates if c not in recent]
         if filtered:
             candidates = filtered
@@ -119,13 +119,13 @@ def _pick(table, tone, profile, field_name):
     return random.choice(candidates)
 
 
-def draft_outline(tone: str, profile: dict | None = None) -> dict:
+def draft_outline(tone: str, account: dict = None) -> dict:
     """Randomly pick one entry per table, filtered by tone and excluding this
-    profile's recent picks. Returns raw picks only — no prose, no LLM call."""
+    account's recent picks. Returns raw picks only — no prose, no LLM call."""
     return {
         "tone": tone,
-        "setting_archetype": _pick(SETTINGS, tone, profile, "setting_archetype"),
-        "antagonist_archetype": _pick(ANTAGONIST_ARCHETYPES, tone, profile, "antagonist_archetype"),
+        "setting_archetype": _pick(SETTINGS, tone, account, "setting_archetype"),
+        "antagonist_archetype": _pick(ANTAGONIST_ARCHETYPES, tone, account, "antagonist_archetype"),
         "antagonist_motivation": random.choice(ANTAGONIST_MOTIVATIONS),
         "hook_type": random.choice(HOOK_TYPES),
         "twist_type": random.choice(TWIST_TYPES),

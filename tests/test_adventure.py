@@ -1,5 +1,5 @@
+import account
 import adventure
-import profile
 
 
 def _sample_full_adventure(total_beats=3, current_beat=0, adaptations=None):
@@ -49,26 +49,26 @@ def test_draft_outline_respects_tone_tags():
 
 
 def test_draft_outline_excludes_recent_picks_when_possible():
-    p = profile.create_profile("Sam")
+    a = account.create_account("Sam", "hunter2")
     # Exhaust all but one Horror-tagged antagonist archetype as "recent".
     horror_archetypes = [text for text, tags in adventure.ANTAGONIST_ARCHETYPES if "Horror" in tags]
     for archetype in horror_archetypes[:-1]:
-        profile.start_new_adventure(p, {"antagonist_archetype": archetype})
-        profile.complete_current_adventure(p)
+        account.start_new_adventure(a, {"antagonist_archetype": archetype})
+        account.complete_current_adventure(a)
 
-    outline = adventure.draft_outline("Horror", p)
+    outline = adventure.draft_outline("Horror", a)
     assert outline["antagonist_archetype"] == horror_archetypes[-1]
 
 
 def test_draft_outline_falls_back_when_all_recent():
-    p = profile.create_profile("Sam")
+    a = account.create_account("Sam", "hunter2")
     horror_archetypes = [text for text, tags in adventure.ANTAGONIST_ARCHETYPES if "Horror" in tags]
     for archetype in horror_archetypes:
-        profile.start_new_adventure(p, {"antagonist_archetype": archetype})
-        profile.complete_current_adventure(p)
+        account.start_new_adventure(a, {"antagonist_archetype": archetype})
+        account.complete_current_adventure(a)
 
     # All Horror-tagged options are "recent" -- must fall back rather than error.
-    outline = adventure.draft_outline("Horror", p)
+    outline = adventure.draft_outline("Horror", a)
     assert outline["antagonist_archetype"] in horror_archetypes
 
 

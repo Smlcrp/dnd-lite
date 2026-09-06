@@ -2,14 +2,15 @@ import session
 
 
 def _sample_session():
-    return session.empty_session("Sam", "Kessa", ["Ranger", "Rogue"], "cautious but kind")
+    return session.empty_session("Sam", "Kessa", ["Ranger", "Rogue"], 3, "cautious but kind")
 
 
 def test_empty_session_shape():
     s = _sample_session()
-    assert s["profile_name"] == "Sam"
+    assert s["account_name"] == "Sam"
     assert s["character_name"] == "Kessa"
     assert s["classes"] == ["Ranger", "Rogue"]
+    assert s["level"] == 3
     assert s["history"] == []
     assert s["flags"] == {}
     assert s["adventure"] is None
@@ -24,6 +25,7 @@ def test_save_and_load_round_trip():
     loaded = session.load_active_session("Sam")
     assert loaded is not None
     assert loaded["character_name"] == "Kessa"
+    assert loaded["level"] == 3
     assert loaded["history"] == [{"role": "dm", "text": "You arrive at a tavern."}]
 
 
@@ -44,7 +46,7 @@ def test_replace_on_new_adventure_leaves_exactly_one_file():
     session.delete_session("Sam")
     assert session.has_active_session("Sam") is False
 
-    s2 = session.empty_session("Sam", "Borin", ["Fighter"], "gruff but loyal")
+    s2 = session.empty_session("Sam", "Borin", ["Fighter"], 1, "gruff but loyal")
     session.save_session(s2)
 
     loaded = session.load_active_session("Sam")

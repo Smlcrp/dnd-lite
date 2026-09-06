@@ -26,7 +26,7 @@ def _sample_adventure(current_beat=0, adaptations=None):
 
 
 def _sample_session(story_mode=False, history=None, adventure_adaptations=None, current_beat=0):
-    s = session.empty_session("Sam", "Kessa", ["Ranger", "Rogue"], "cautious but kind")
+    s = session.empty_session("Sam", "Kessa", ["Ranger", "Rogue"], 3, "cautious but kind")
     s["adventure"] = _sample_adventure(current_beat=current_beat, adaptations=adventure_adaptations)
     s["story_mode"] = story_mode
     if history:
@@ -42,13 +42,24 @@ def test_system_prompt_includes_core_blocks():
 
     assert "ABSOLUTE RULE" in prompt
     assert "Kessa" in prompt
+    assert "level 3" in prompt
     assert "Ranger/Rogue" in prompt
     assert "cautious but kind" in prompt
     assert "NARRATION STYLE" in prompt
     assert "PLAYER AGENCY" in prompt
     assert "SELF-REPORTED DICE" in prompt
+    assert "5E KNOWLEDGE" in prompt
+    assert "LEVEL PROGRESSION" in prompt
     assert "TAGS:" in prompt
     assert "The Drowned Crown" in prompt
+
+
+def test_system_prompt_level_progression_is_narrative_only():
+    d = dm.DungeonMaster()
+    prompt = d._build_system_prompt(_sample_session())
+
+    assert "does not track XP" in prompt
+    assert "player's own physical or external character sheet" in prompt
 
 
 def test_system_prompt_opening_turn_has_no_scene_anchor():

@@ -8,11 +8,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolate_storage(tmp_path, monkeypatch):
-    """Point session/profile storage at a per-test tmp dir so tests never
-    touch the real sessions/ or profiles/ directories."""
+    """Point session/account storage at a per-test tmp dir so tests never
+    touch the real sessions/ or accounts/ directories."""
     import session
-    import profile
+    import account
 
     monkeypatch.setattr(session, "SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(profile, "PROFILES_DIR", tmp_path / "profiles")
+    monkeypatch.setattr(account, "ACCOUNTS_DIR", tmp_path / "accounts")
     yield

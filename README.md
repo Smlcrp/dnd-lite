@@ -2,7 +2,7 @@
 
 A lightweight, text-based AI Dungeon Master. It narrates a D&D adventure for a character you already have — no in-app character creation or stat management.
 
-**Status: v1 implemented.** All modules described below are built, with 69 unit tests (Ollama mocked) and a manually-verified end-to-end playthrough against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
+**Status: implemented**, including accounts/login and character leveling. All modules described below are built, with 93 unit tests (Ollama mocked) and manually-verified end-to-end playthroughs against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
 
 ## Context
 
@@ -18,68 +18,102 @@ A key design goal, adapted from concepts in dndgame: that project used [8 hand-w
 - **LLM backend**: local Ollama, no provider-abstraction layer.
 - **Interface**: CLI first. Web UI is an explicit future phase — no Flask/web scaffolding now.
 - **Dice**: self-reported by the player in natural language; the DM narrates qualitative outcomes, never does arithmetic.
-- **Persistence**: sessions (one adventure's live state) save/resume via JSON. Additionally, **player profiles** persist across many adventures (see below). **Only one unfinished adventure can exist per profile at a time** — starting a new adventure while one is pending replaces it. Manual `save` plus autosave-per-turn let the player stop and resume anytime.
+- **Persistence**: sessions (one adventure's live state) save/resume via JSON. Additionally, **accounts** persist across many adventures (see below). **Only one unfinished adventure can exist per account at a time** — starting a new adventure while one is pending replaces it. Manual `save` plus autosave-per-turn let the player stop and resume anytime.
 - **Adventure generation**: randomized building blocks, reconciled into cohesive prose by a hidden one-time LLM "architect" call, with the DM able to adapt the plan mid-story via an explicit tag.
-- **Player input at setup**: character name + class(es) (multiclass-aware) + a short freeform blurb, plus a broad tone/genre pick. No plot details are ever chosen by the player.
-- **Profiles**: multiple named profiles supported (not a single default) — a lightweight local profile picker, no passwords, tracking each profile's adventure history for repeat-avoidance and flavor.
+- **Player input at setup**: character name + class(es) (multiclass-aware) + starting level (1–20) + a short freeform blurb, plus a broad tone/genre pick. No plot details are ever chosen by the player.
+- **Accounts**: multiple named accounts, each gated by a username + password (hashed, stdlib-only). Character details are asked fresh at the start of every new adventure — unless the account opted into a saved **default character** at creation time, which skips that prompt every time (used for the `test` account, but any account can opt in).
+- **D&D 5e knowledge**: no hand-built class/level reference data. The DM prompt tells the LLM it has full working 5e knowledge and to draw on that directly for flavor and encounter calibration — zero data tables, zero added token cost. A short 13-class name list validates input client-side only (never sent to the model).
+- **Leveling**: narrated, not tracked. The player brings a starting level as a flavor/calibration snapshot; the DM may narrate level-ups paced like a real campaign, but the app never stores or recalculates a level number — the player's own physical/external character sheet stays authoritative, exactly like self-reported dice.
 
 ### File structure
 
 ```
 DND-Lite/
 ├── main.py            # entry point: python main.py
-├── cli.py             # game loop, profile/startup menus, streaming display
+├── cli.py             # game loop, login/account-creation menus, streaming display
 ├── dm.py              # DungeonMaster: main narration prompt, tag parsing (incl. [ADAPT:])
 ├── architect.py        # hidden one-time LLM call: reconciles random picks into a cohesive adventure skeleton
 ├── adventure.py        # building-block tables, draft_outline(), adventure_prompt_block(), advance_beat(), apply_adaptation()
-├── profile.py           # player profile CRUD + adventure history (for repeat-avoidance)
+├── account.py           # account CRUD, login verification, default-character storage, adventure history (for repeat-avoidance)
+├── auth.py              # password hashing/verification (stdlib pbkdf2_hmac, no new dependency)
 ├── ollama_client.py     # shared call_ollama()/warmup() used by dm.py and architect.py; resolves DEFAULT_MODEL (fallback / DND_LITE_MODEL env var)
-├── session.py          # per-adventure session dict schema + JSON persistence (one active file per profile)
-├── sessions/           # one file per profile: sessions/<profile_slug>.json (gitignored, created at runtime)
-├── profiles/           # profile files (gitignored, created at runtime)
+├── session.py          # per-adventure session dict schema + JSON persistence (one active file per account)
+├── sessions/           # one file per account: sessions/<account_slug>.json (gitignored, created at runtime)
+├── accounts/            # account files (gitignored, created at runtime)
 ├── tests/
 │   ├── conftest.py
 │   ├── test_session.py
-│   ├── test_profile.py
+│   ├── test_account.py
+│   ├── test_auth.py
 │   ├── test_adventure.py
 │   ├── test_architect.py   # JSON parsing/fallback logic, Ollama mocked
+│   ├── test_cli.py         # login/account-creation flow, class/level validation, tag filter
 │   └── test_dm.py          # prompt assembly + tag parsing (incl. [ADAPT:]), Ollama mocked
 ├── requirements.txt   # requests>=2.31.0, pytest>=7.0.0 — nothing else
-├── .gitignore          # sessions/, profiles/, __pycache__/, *.pyc
+├── .gitignore          # sessions/, accounts/, __pycache__/, *.pyc
 ├── CLAUDE.md
 └── README.md
 ```
 
 Rationale for the two new small modules: `ollama_client.py` exists only because now *two* things call Ollama (the main DM and the one-time architect pass) — factoring the HTTP/streaming plumbing out avoids duplicating it. `architect.py` is kept separate from `dm.py` because it's a fundamentally different call: one-shot, structured-output (JSON), no streaming, no player-facing narration — mixing it into the `DungeonMaster` class would blur two different responsibilities.
 
-### Player profiles (`profile.py`)
+### Authentication (`auth.py`)
 
-A profile is a persistent record of one person's play history, separate from any single adventure's session file. Multiple named profiles are supported (no passwords) so more than one player/character history can be tracked on the same machine.
+Pure stdlib password hashing — no new dependency:
+```python
+def hash_password(password: str) -> tuple[str, str]:
+    """Returns (salt_hex, hash_hex). os.urandom(16) salt,
+    hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 200_000)."""
+
+def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
+    """Recomputes the hash and compares with hmac.compare_digest
+    (constant-time)."""
+```
+
+This is a local, single-player CLI tool, not a networked service — the goal is "don't store plaintext passwords," not defending against a sophisticated attacker with file access. No password complexity rules, no lockout policy.
+
+### Player accounts (`account.py`)
+
+An account is a persistent record of one person's credentials and play history, separate from any single adventure's session file. Multiple named accounts are supported so more than one player/character history can be tracked on the same machine.
 
 ```python
 def slugify(name: str) -> str
-def create_profile(profile_name: str) -> dict
-def load_profile(profile_name: str) -> dict
-def save_profile(profile: dict) -> None
-def list_profiles() -> list[str]
-def start_new_adventure(profile: dict, entry: dict) -> None
-def complete_current_adventure(profile: dict) -> None
-def current_adventure_entry(profile: dict) -> dict | None
-def recent_picks(profile: dict, field: str, n: int = 5) -> list[str]
+def create_account(account_name: str, password: str) -> dict
+def verify_login(account: dict, password: str) -> bool
+def set_default_character(account: dict, name: str, classes: list[str], level: int, blurb: str) -> None
+def get_default_character(account: dict) -> dict | None
+def load_account(account_name: str) -> dict
+def save_account(account: dict) -> None
+def list_accounts() -> list[str]
+def start_new_adventure(account: dict, entry: dict) -> None
+def complete_current_adventure(account: dict) -> None
+def current_adventure_entry(account: dict) -> dict | None
+def recent_picks(account: dict, field: str, n: int = 5) -> list[str]
 ```
 
-`start_new_adventure` enforces the one-active-adventure invariant on the *history* side: if the profile's most recent adventure entry has `status == "in_progress"`, it's flipped to `"abandoned"` (its metadata is kept for repeat-avoidance — only the live playthrough is discarded, not the historical record), then the new entry is appended as `"in_progress"` and the profile is saved. `complete_current_adventure` flips the current in-progress entry to `"completed"` (called by the CLI on `[CLIMAX]`→`[BREAK]`). `current_adventure_entry` returns the in-progress entry if one exists, else `None` — used by the CLI to show "Resume '<title>'..." without needing to open the session file.
+`start_new_adventure` enforces the one-active-adventure invariant on the *history* side: if the account's most recent adventure entry has `status == "in_progress"`, it's flipped to `"abandoned"` (its metadata is kept for repeat-avoidance — only the live playthrough is discarded, not the historical record), then the new entry is appended as `"in_progress"` and the account is saved. `complete_current_adventure` flips the current in-progress entry to `"completed"` (called by the CLI on `[CLIMAX]`→`[BREAK]`). `current_adventure_entry` returns the in-progress entry if one exists, else `None` — used by the CLI to show "Resume '<title>'..." without needing to open the session file.
 
-Schema (`profiles/<slug>.json`):
+**`default_character`** is optional and `None` unless the account opted in at creation time. If set, the CLI skips the character-detail prompts on every new adventure and reuses it — this is a general feature any account can use, not a special case hardcoded to one account name. Its immediate purpose is the `test` account (see "Running" below): username `test`, password `test`, default character `Adventurer` the `Fighter`, level 3.
+
+Schema (`accounts/<slug>.json`):
 ```python
 {
-    "profile_name": "Sam",
+    "account_name": "Sam",
     "created_at": ...,
+    "password_salt": "<hex>",
+    "password_hash": "<hex>",
+    "default_character": {                    # or None
+        "name": "Adventurer",
+        "classes": ["Fighter"],
+        "level": 3,
+        "blurb": "",
+    },
     "adventures": [
         {
-            "session_name": "...",
+            "title": "...",
             "character_name": "Kessa",
             "classes": ["Ranger", "Rogue"],   # list, not stat-leveled — multiclass is just a flavor list here
+            "level": 5,                        # starting level for this adventure, never updated afterward
             "blurb": "cautious but kind, grew up on the road",
             "tone": "Horror",
             "setting_archetype": "...",
@@ -95,20 +129,21 @@ Schema (`profiles/<slug>.json`):
 }
 ```
 
-`recent_picks(profile, "antagonist_archetype", n=5)` — used by `adventure.draft_outline()` to exclude a table category's last N picks across this profile's adventures, so back-to-back sessions for the same player don't reuse the same antagonist type, setting, hook, twist, or climax shape. If every option in a table has been used recently (small table, prolific player), fall back to the full table rather than raising an error.
+`recent_picks(account, "antagonist_archetype", n=5)` — used by `adventure.draft_outline()` to exclude a table category's last N picks across this account's adventures, so back-to-back sessions for the same player don't reuse the same antagonist type, setting, hook, twist, or climax shape. If every option in a table has been used recently (small table, prolific player), fall back to the full table rather than raising an error.
 
 `start_new_adventure` is called once at adventure creation, so repeat-avoidance works even for adventures that later get abandoned. `complete_current_adventure` is called when the DM emits `[CLIMAX]` followed by `[BREAK]`, or the player explicitly ends the story.
 
 ### Session schema (`session.py`)
 
-**Only one unfinished adventure can exist per profile at a time.** Rather than a list of named saves, each profile has a single active-session slot: `sessions/<profile_slug>.json`. Starting a new adventure while one is pending overwrites this file (after the CLI confirms with the player — see CLI flow below); there is no session-name picker to maintain, since there's never more than one file to choose from.
+**Only one unfinished adventure can exist per account at a time.** Rather than a list of named saves, each account has a single active-session slot: `sessions/<account_slug>.json`. Starting a new adventure while one is pending overwrites this file (after the CLI confirms with the player — see CLI flow below); there is no session-name picker to maintain, since there's never more than one file to choose from.
 
 ```python
-def empty_session(profile_name, character_name, classes, blurb) -> dict:
+def empty_session(account_name, character_name, classes, level, blurb) -> dict:
     return {
-        "profile_name": profile_name,
+        "account_name": account_name,
         "character_name": character_name,
         "classes": classes,          # list[str], e.g. ["Ranger", "Rogue"]
+        "level": level,               # starting level (1-20), a flavor/calibration snapshot -- never updated
         "blurb": blurb,               # freeform flavor text
         "location": "",
         "scene": "",                  # last raw DM narration, feeds the scene anchor
@@ -120,11 +155,11 @@ def empty_session(profile_name, character_name, classes, blurb) -> dict:
         "updated_at": ...,
     }
 
-def session_path(profile_name) -> Path
-def save_session(session) -> None              # overwrites sessions/<profile_slug>.json
-def load_active_session(profile_name) -> dict | None   # None if no unfinished adventure
-def has_active_session(profile_name) -> bool
-def delete_session(profile_name) -> None       # called right before a replacement is created
+def session_path(account_name) -> Path
+def save_session(session) -> None              # overwrites sessions/<account_slug>.json
+def load_active_session(account_name) -> dict | None   # None if no unfinished adventure
+def has_active_session(account_name) -> bool
+def delete_session(account_name) -> None       # called right before a replacement is created
 def add_history(session, role, text) -> None
 def set_flag(session, key, value=True) / get_flag(session, key, default=False)
 ```
@@ -150,9 +185,9 @@ PRESETS = {
     "Epic":     {"beats": 5, "estimate": "~5-8h", "blurb": "Runs across multiple sessions with deeper subplots."},
 }
 
-def draft_outline(tone: str, profile: dict) -> dict:
+def draft_outline(tone: str, account: dict) -> dict:
     """Randomly pick one entry per table, filtered by tone tags and excluding
-    this profile's recent picks (via profile.recent_picks). Returns the RAW
+    this account's recent picks (via account.recent_picks). Returns the RAW
     picks only — no prose yet. This is pure Python, fully unit-testable,
     no LLM call."""
 
@@ -229,16 +264,20 @@ class DungeonMaster:
 System prompt blocks, in order:
 
 1. **Absolute rule header** — never write the player's dialogue/decisions/emotions for them.
-2. **Character block** — name, classes (multiclass listed as-is, no levels/stats), and blurb, at face value, no invented stats.
+2. **Character block** — name, **level**, classes (multiclass listed as-is), and blurb, at face value, no invented stats.
 3. **Narration rules** — second person, vivid, 3–5 sentences, end each turn at a choice point.
 4. **Player-agency rules** — never write the player's dialogue, emotions, or unstated decisions; always end at a natural pause.
 5. **Self-reported dice block** — qualitative bands, no DC spoken, no arithmetic (see below).
-6. **Tag rules** — the tag set below, including `[ADAPT:]`.
-7. **Adventure block** — `adventure.adventure_prompt_block(session["adventure"])`: the **original outline** (title/setting/hook/antagonist/beats/climax), the **current stage** (`stage_labels()` position + beat rules — don't rush, don't skip to the climax early, don't reveal climax/resolution), and, if any exist, a **live adaptations** section listed last and marked as authoritative over the original where they conflict.
-8. **Story Mode block** — only if `session["story_mode"]`.
-9. **Scene anchor** — last ~400 chars of the prior DM turn, truncated on a sentence boundary, "SCENE IN PROGRESS — DO NOT RESET." This is the key trick that keeps a small local model from losing the thread.
-10. **Opening vs. continuing instruction** — no history → open with the adventure hook + character blurb; scene anchor present → never re-establish setting.
-11. **Final reminder footer** — one-line reiteration of the absolute rule.
+6. **5e knowledge block** — tells the model it has full working D&D 5e knowledge (classes, leveling, class features) and should draw on that training directly for flavor and encounter calibration. No hand-built data — this is a couple of sentences, zero added token cost.
+7. **Level progression block** — the DM may narrate level-ups paced like a real campaign ("should happen all the time," per design intent, just kept realistic), but this is flavor only: the app never stores or recalculates a level number. The player's own physical/external character sheet is authoritative, exactly like self-reported dice.
+8. **Tag rules** — the tag set below, including `[ADAPT:]`.
+9. **Adventure block** — `adventure.adventure_prompt_block(session["adventure"])`: the **original outline** (title/setting/hook/antagonist/beats/climax), the **current stage** (`stage_labels()` position + beat rules — don't rush, don't skip to the climax early, don't reveal climax/resolution), and, if any exist, a **live adaptations** section listed last and marked as authoritative over the original where they conflict.
+10. **Story Mode block** — only if `session["story_mode"]`.
+11. **Scene anchor** — last ~400 chars of the prior DM turn, truncated on a sentence boundary, "SCENE IN PROGRESS — DO NOT RESET." This is the key trick that keeps a small local model from losing the thread.
+12. **Opening vs. continuing instruction** — no history → open with the adventure hook + character blurb; scene anchor present → never re-establish setting.
+13. **Final reminder footer** — one-line reiteration of the absolute rule.
+
+No new tag or session/adventure state field was introduced for level-ups — deliberately. Continuity relies on the same history-window + scene-anchor mechanism already used for everything else, consistent with "shouldn't be tracked by the game."
 
 #### Self-reported dice
 
@@ -269,47 +308,56 @@ History windowing: system prompt + last ~12 turns + current input.
 
 ### CLI flow (`cli.py`, `main.py`)
 
-**Startup**: profile picker first — list existing profiles (`profile.list_profiles()`) or create a new one by typing a name. Then the menu depends on whether that profile has an unfinished adventure (`session.has_active_session(profile_name)`, backed by `profile.current_adventure_entry(profile)` for the display title/date):
+**Startup — login or create an account**:
+1. Prompt for account name.
+2. **Existing account**: prompt for password via `getpass.getpass` (masked, no echo), verify with `account.verify_login`. Wrong password → re-prompt or bail back to the account-name prompt; no hard lockout (local single-player tool, not a networked service).
+3. **No such account**: confirm — *"No account named '<name>' — create one? [y/N]"*. If yes: password + a confirmation retype (must match), then *"Save a default character for this account, so you skip character setup on every adventure? [y/N]"* — if yes, collect name/class(es)/level/blurb once via `account.set_default_character`.
 
-- **Unfinished adventure exists**: `1) Resume "<title>" (last played <date>)`, `2) Start a new adventure`, `3) Quit`. Choosing (2) prompts a confirmation — *"This will discard your unfinished adventure '<title>'. Continue? [y/N]"* — before proceeding, since replacing it is destructive and irreversible.
+Then the menu depends on whether the account has an unfinished adventure (`session.has_active_session(account_name)`, backed by `account.current_adventure_entry(account)` for the display title/date):
+
+- **Unfinished adventure exists**: `1) Resume "<title>" (started <date>)`, `2) Start a new adventure`, `3) Quit`. Choosing (2) prompts a confirmation — *"This will discard your unfinished adventure '<title>'. Continue? [y/N]"* — before proceeding, since replacing it is destructive and irreversible.
 - **No unfinished adventure**: `1) New adventure`, `2) Quit`.
 
 **New adventure** (after any confirmation above):
-1. Character name.
-2. Class(es) — a single prompt accepting multiclass input (e.g. `Ranger/Rogue`), split and stored as a list.
-3. Freeform blurb (a sentence or two of flavor/personality).
-4. Tone picker (Classic Fantasy / Horror / Heist / Political Intrigue / …).
-5. Length preset — One Shot / Quest / Epic, shown with each preset's `blurb` + `estimate` from `adventure.PRESETS`.
-6. `adventure.draft_outline(tone, profile)` → raw picks (instant, no LLM call).
-7. `architect.build_adventure(draft, character_name, classes, blurb, preset)` → full skeleton. Print a "The DM is preparing your adventure…" message while this call runs (it's a real, possibly multi-second, Ollama call).
-8. If a previous unfinished adventure existed: `session.delete_session(profile_name)` first. Then `profile.start_new_adventure(profile, {...})` (marks any prior in-progress entry `abandoned`, appends the new one as `in_progress`), `session.save_session(session)` immediately.
-9. `dm.warmup()`, then an opening DM call with a synthetic `"[BEGIN ADVENTURE]"` input.
+- **If the account has a `default_character`**: skip straight to the tone/length pickers, printing *"Using your saved character: <name> the <classes> (Level <level>)"*.
+- **Otherwise**:
+  1. Character name.
+  2. Class(es) — a single prompt accepting multiclass input (e.g. `Fighter/Rogue`), validated against the 13 official 5e classes (case-insensitive, re-prompts on an unrecognized name) and stored as a list.
+  3. Starting level (1–20), re-prompts on non-numeric or out-of-range input.
+  4. Freeform blurb (a sentence or two of flavor/personality).
+- Then, for every new adventure regardless of path: tone picker (Classic Fantasy / Horror / Heist / Political Intrigue / …), length preset — One Shot / Quest / Epic, shown with each preset's `blurb` + `estimate` from `adventure.PRESETS`.
+- `adventure.draft_outline(tone, account)` → raw picks (instant, no LLM call).
+- `architect.build_adventure(draft, character_name, classes, blurb, preset)` → full skeleton. Print a "The DM is preparing your adventure…" message while this call runs (it's a real, possibly multi-second, Ollama call).
+- If a previous unfinished adventure existed: `session.delete_session(account_name)` first. Then `account.start_new_adventure(account, {...})` (marks any prior in-progress entry `abandoned`, appends the new one as `in_progress`, now also carrying `level`), `session.save_session(session)` immediately.
+- `dm.warmup()`, then an opening DM call with a synthetic `"[BEGIN ADVENTURE]"` input.
 
-**Resume**: `session.load_active_session(profile_name)` → `dm.recap(session)`. No picker needed — there is at most one file to load.
+**Resume**: `session.load_active_session(account_name)` → `dm.recap(session)`. No picker needed — there is at most one file to load.
 
-**Main loop**: `save`/`quit`/`exit` handled locally, everything else sent to `respond_stream` with tokens printed as they arrive, **autosave after every turn** (this plus the explicit `save` command is what lets the player stop and resume at any point, not just at `quit`), `RuntimeError` around dropped-Ollama-server errors. On `[CLIMAX]` followed by `[BREAK]` (or explicit quit-after-climax), call `profile.complete_current_adventure(profile)` — the session file itself is left in place (a completed adventure can still be replayed/reviewed via `resume` until the player starts a new one, at which point it's replaced like any other unfinished-vs-new transition).
+**Main loop**: `save`/`quit`/`exit` handled locally, everything else sent to `respond_stream` with tokens printed as they arrive **through a live tag filter** (`_TagFilter` — strips `[TAG: ...]` sequences character-by-character from the streamed tokens, since `respond_stream` only strips tags from the final assembled text, not the individual tokens it yields), **autosave after every turn** (this plus the explicit `save` command is what lets the player stop and resume at any point, not just at `quit`), `RuntimeError` around dropped-Ollama-server errors. On `[CLIMAX]` followed by `[BREAK]` (or explicit quit-after-climax), call `account.complete_current_adventure(account)` — the session file itself is left in place (a completed adventure can still be replayed/reviewed via `resume` until the player starts a new one, at which point it's replaced like any other unfinished-vs-new transition).
 
 ### Build order
 
-1. `session.py` and `profile.py` — schemas + persistence, unit-testable in isolation with `tmp_path`. No interdependency between them beyond `session["profile_name"]` being a plain string. Test the replace-on-new-adventure path explicitly: `save_session` → `delete_session` → `save_session` again leaves exactly one file, and `profile.start_new_adventure` correctly flips a prior `in_progress` entry to `abandoned`.
-2. `adventure.py` — building-block tables, `draft_outline` (including recent-picks exclusion via a mocked/fake profile), `stage_labels` (test all 3 preset beat counts), `adventure_prompt_block`, `advance_beat` (test capping at `total_beats`), `apply_adaptation`.
-3. `ollama_client.py` — thin shared HTTP/streaming wrapper, tested with `requests` mocked.
-4. `architect.py` — prompt construction + JSON parsing + retry + deterministic fallback; test all three paths (valid JSON, one retry then success, fallback) with Ollama mocked.
-5. `dm.py` prompt builder — assemble all blocks including the adventure/adaptations split; test block presence/absence.
-6. `dm.py` tag parser — test all 6 tags (including `[ADAPT:]`) plus no-tags and whitespace/casing variants.
-7. `dm.py` streaming/respond/recap — Ollama mocked in tests.
-8. `cli.py` + `main.py` — profile picker, new/resume flows, main loop, autosave, completion status updates.
-9. Manual playtest against real local Ollama: verify two fresh adventures with the same tone don't reuse the same antagonist archetype, verify the architect pass produces coherent output even when picks clash, verify an off-script player choice produces a sensible `[ADAPT:]` and that the new direction persists across subsequent turns, verify quit-and-resume recap continuity, and verify that starting a new adventure with one already pending shows the confirmation and correctly discards the old one.
-10. `CLAUDE.md`, `README.md`, `requirements.txt`, `.gitignore` — finalized last.
+1. `session.py` and `account.py` — schemas + persistence, unit-testable in isolation with `tmp_path`. No interdependency between them beyond `session["account_name"]` being a plain string. Tests cover the replace-on-new-adventure path explicitly (`save_session` → `delete_session` → `save_session` again leaves exactly one file) and `account.start_new_adventure` correctly flipping a prior `in_progress` entry to `abandoned`.
+2. `auth.py` — password hash/verify round-trip, wrong-password rejection, unique salt per call.
+3. `adventure.py` — building-block tables, `draft_outline` (including recent-picks exclusion via a mocked/fake account), `stage_labels` (all 3 preset beat counts), `adventure_prompt_block`, `advance_beat` (capping at `total_beats`), `apply_adaptation`.
+4. `ollama_client.py` — thin shared HTTP/streaming wrapper, tested with `requests` mocked.
+5. `architect.py` — prompt construction + JSON parsing + retry + deterministic fallback; all three paths (valid JSON, one retry then success, fallback) tested with Ollama mocked.
+6. `dm.py` prompt builder — all blocks including the character/level block, 5e-knowledge and level-progression blocks, and the adventure/adaptations split; block presence/absence tested.
+7. `dm.py` tag parser — all 6 tags (including `[ADAPT:]`) plus no-tags and whitespace/casing variants.
+8. `dm.py` streaming/respond/recap — Ollama mocked in tests.
+9. `cli.py` + `main.py` — login/account-creation flow (`getpass` mocked in tests alongside `input`), class/level validation, default-character skip path, new/resume flows, main loop, autosave, completion status updates.
+10. The `test` account created (via the normal CLI flow, not a special script): username `test`, password `test`, default character Adventurer/Fighter/level 3.
+11. Manual + real playtests against local Ollama: two fresh adventures with the same tone don't reuse the same antagonist archetype; the architect pass produces coherent output even when picks clash; an off-script player choice produces a sensible `[ADAPT:]` that persists across subsequent turns; quit-and-resume recap continuity; starting a new adventure with one already pending shows the confirmation and correctly discards the old one; the `test` account skips character entry and shows the saved character; a normal account still asks for character + level each adventure; wrong password rejected, correct password accepted; class validation rejects a bogus name and accepts valid multiclass input; the DM's narration reflects the character's level appropriately.
+12. `CLAUDE.md`, `README.md`, `requirements.txt`, `.gitignore` — finalized last.
 
 ### Explicit non-goals
 
-No combat engine, no character stats/HP, no companions, no XP/leveling, no TTS, no D&D Beyond import, no Flask/web/Electron, no provider-abstraction layer, no password/auth on profiles. A future web phase could reuse dndgame's [SSE-streaming](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/api.py#L375-L409) + [live tag-filtering](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/static/js/scenes/GameScene.js#L173-L190) approach conceptually, but no scaffolding for it now.
+No combat engine, no character stats/HP, no companions, no XP counter, no mechanical class-feature engine, no hand-built 5e reference data, no TTS, no D&D Beyond import, no Flask/web/Electron, no provider-abstraction layer, no password complexity rules or account lockout policy (unnecessary for a local single-player tool). Level is a stored *snapshot*, set once per adventure (or inherited from a default character) and never mechanically recalculated by this app. A future web phase could reuse dndgame's [SSE-streaming](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/api.py#L375-L409) + [live tag-filtering](https://github.com/Smlcrp/dndgame/blob/0a79c9d5ff6002fff8c8d1f515818f06e8b26afe/views/web/static/js/scenes/GameScene.js#L173-L190) approach conceptually, but no scaffolding for it now.
 
 ### Verification
 
-- `pytest tests/` — all unit tests pass (session/profile persistence round-trips, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`) without a live Ollama server.
-- Manual playtest per build-order step 9.
+- `pytest tests/` — 93 unit tests pass (session/account persistence round-trips, password hashing, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`, login/account-creation flow, class/level validation) without a live Ollama server.
+- Manual + real playtests per build-order step 11, all passing against a real local Ollama server.
 
 ## Running
 
@@ -324,6 +372,10 @@ Run the test suite (Ollama mocked, no live server needed) with:
 ```
 .venv/bin/python -m pytest tests/
 ```
+
+### Test account
+
+A `test`/`test` account exists for quick manual testing, with a saved default character (Adventurer, Fighter, level 3) that skips character setup on every new adventure. It's created the same way any account is — via the normal login flow's "create one?" prompt — not by a special script; if `accounts/test.json` doesn't exist on your machine, log in as `test`, say yes to creating it, use password `test`, and say yes to saving a default character with those values.
 
 ### Choosing a model
 
