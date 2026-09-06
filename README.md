@@ -2,7 +2,7 @@
 
 A lightweight, text-based AI Dungeon Master. It narrates a D&D adventure for a character you already have — no in-app character creation or stat management.
 
-**Status: implemented**, including accounts/login, character leveling, and a hand-built 5e reference dataset for narration precision. All modules described below are built, with 143 unit tests (Ollama mocked) and manually-verified end-to-end playthroughs against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
+**Status: implemented**, including accounts/login, character leveling, and a hand-built 5e reference dataset for narration precision. All modules described below are built, with 146 unit tests (Ollama mocked) and manually-verified end-to-end playthroughs against a real local Ollama server. This README doubles as the architecture reference for the design it was built from.
 
 ## Context
 
@@ -37,7 +37,7 @@ DND-Lite/
 ├── reference/           # hand-built 5e reference data (weapons, conditions, death & dying, per-class features/spell-slots, SRD spells by class, tier-based monster/NPC archetypes) -- every retrieval function filters to the player's own class(es)/level/adventure before injection
 ├── account.py           # account CRUD, login verification, default-character storage, adventure history (for repeat-avoidance)
 ├── auth.py              # password hashing/verification (stdlib pbkdf2_hmac, no new dependency)
-├── ollama_client.py     # shared call_ollama()/warmup() used by dm.py and architect.py; resolves DEFAULT_MODEL (fallback / DND_LITE_MODEL env var)
+├── ollama_client.py     # shared call_ollama()/warmup() used by dm.py and architect.py; resolves DEFAULT_MODEL (fallback / DND_LITE_MODEL env var); NUM_CTX=16384 set on every call to avoid silent prompt truncation (see "Response latency")
 ├── session.py          # per-adventure session dict schema + JSON persistence (one active file per account)
 ├── sessions/           # one file per account: sessions/<account_slug>.json (gitignored, created at runtime)
 ├── accounts/            # account files (gitignored, created at runtime)
@@ -384,7 +384,7 @@ No combat engine, no character stats/HP, no companions, no XP counter, no mechan
 
 ### Verification
 
-- `pytest tests/` — 143 unit tests pass (session/account persistence round-trips, password hashing, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`/`[STATUS:]`/`[ENCOUNTER:]`, login/account-creation flow, class/level validation, `reference/`'s per-class/spell/monster filtering and bounded prompt size) without a live Ollama server.
+- `pytest tests/` — 146 unit tests pass (session/account persistence round-trips, password hashing, one-active-adventure replace behavior, draft-outline repeat-avoidance, architect JSON parsing + fallback, prompt block assembly, tag parsing incl. `[ADAPT:]`/`[STATUS:]`/`[ENCOUNTER:]`, login/account-creation flow, class/level validation, `reference/`'s per-class/spell/monster filtering and bounded prompt size, `num_ctx` set consistently across all three Ollama call sites) without a live Ollama server.
 - Manual + real playtests per build-order step 11, all passing against a real local Ollama server.
 
 ## Running
@@ -416,7 +416,7 @@ A `test`/`test` account exists for quick manual testing, with a saved default ch
 
 ### Choosing a model
 
-`llama3.1:8b` is the built-in default -- it runs acceptably (~30-60s/turn) on an 8-core CPU with no GPU, and reliably follows the tag/JSON instructions the game depends on. If you have a capable GPU, a larger model (e.g. `nous-hermes2:10.7b`) will be both faster and higher quality. Three ways to switch, in increasing precedence:
+`llama3.1:8b` is the built-in default -- it reliably follows the tag/JSON instructions the game depends on, and runs on an 8-core CPU with no GPU (see "Response latency" below for what "runs" actually means in practice on CPU-only hardware). If you have a capable GPU, a larger model (e.g. `nous-hermes2:10.7b`) will be both faster and higher quality. Three ways to switch, in increasing precedence:
 
 1. **Edit the fallback** — change `_FALLBACK_MODEL` in `ollama_client.py`.
 2. **Environment variable** — set `DND_LITE_MODEL` before launching:
@@ -429,3 +429,18 @@ A `test`/`test` account exists for quick manual testing, with a saved default ch
    ```
 
 Whichever model you pick, `ollama pull` it first. The chosen model applies to both the main narration (`dm.py`) and the one-time adventure architect pass (`architect.py`).
+
+### Response latency
+
+`ollama_client.py` sets an explicit `NUM_CTX = 16384` on every call (`warmup`/`call_ollama`/`stream_ollama`, all identical -- Ollama reloads the model runner if a later request's `num_ctx` differs from the one it was first loaded with). This isn't a speed tweak -- it fixes a correctness bug: Ollama's own default context window for this model is 4096 tokens, smaller than a fully-loaded `reference/`-heavy system prompt can get for a high-level/multiclass session (measured up to ~8,000 tokens). Without an override, llama.cpp silently truncates from the **front** of the prompt to fit, which can drop `ABSOLUTE_RULE`/`PLAYER_AGENCY_RULES`/`SELF_REPORTED_DICE_BLOCK` entirely -- confirmed empirically by planting a marker at the very start of an oversized prompt and watching the model deny ever seeing it. `NUM_CTX = 16384` gives headroom over the worst realistic (non-pathological) session measured so far.
+
+On CPU-only hardware, prefill (processing the prompt) massively dominates generation (writing the reply) -- a measured ~19 tok/s prefill vs. negligible generation time for a short reply. What keeps this playable at all is that Ollama automatically reuses cached computation across turns that share a long prompt prefix, which every consecutive turn of the same adventure does (same character/reference-data/adventure-outline content; only the trailing scene anchor + history + player input differs). Measured: two back-to-back turns sharing a 97.9%-identical system prompt went from 296.9s (cold, 18.9 tok/s) to 23.6s (240 tok/s) -- a ~12.6x speedup, with **no code change required**, since it's Ollama's own default behavior and `dm.py` already structures the prompt with static content first and turn-varying content last (the shape that makes prefix caching work).
+
+Practical implication: the *first* turn of a new adventure, or the first turn after a resume, is the expensive one (multiple minutes for a heavy reference-data session on CPU) -- `architect.build_adventure()` (adventure start) and `dm.recap()` (on resume) both send differently-shaped prompts that don't share the main narration prompt's prefix, so they don't get this benefit, and the turn immediately following either will also be a "cold" call. Every turn after that, within the same continuous session, should already be fast.
+
+## Next steps
+
+**Response speed is the active area of work.** The `num_ctx` fix above was a correctness prerequisite (it stops silent truncation, but full-context processing is expensive on CPU-only hardware), and the cache-reuse finding explains why ongoing play is faster than a cold-start measurement suggests -- but the cold-start cost itself (adventure start, and the turn right after every resume) is still large for a heavy reference-data session, and hasn't yet been reduced. Candidates not yet tried, roughly in order of how "free" (no accuracy cost) they are:
+- Warming the *actual* system prompt's cache proactively (right now `warmup()` only preloads the model into RAM with a trivial `"hi"` message, not the real prefix) -- could turn the first real turn's cache-miss into a cache-hit before the player even sees it.
+- Reducing `HISTORY_WINDOW` or trimming reference-data wording -- real savings, but this is prompt *content* the game relies on, so it needs to be weighed against the accuracy it currently buys.
+- A smaller/more heavily quantized model, or GPU offload if available -- a genuine speed/quality trade-off, not attempted here since this machine is CPU-only.

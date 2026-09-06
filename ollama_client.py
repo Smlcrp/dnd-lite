@@ -22,6 +22,21 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 # model= argument.
 _FALLBACK_MODEL = "llama3.1:8b"
 
+# Ollama's own default context window (4096 tokens for this model, confirmed
+# via /api/ps) is smaller than a fully-loaded reference.py system prompt can
+# get for a high-level/multiclass session (measured up to ~8000 tokens) --
+# without an explicit override, llama.cpp silently truncates from the FRONT
+# of the prompt to fit, which can drop ABSOLUTE_RULE/PLAYER_AGENCY_RULES/
+# SELF_REPORTED_DICE_BLOCK entirely (confirmed empirically: a marker planted
+# at the very start of an oversized prompt was unrecoverable). 16384 gives
+# comfortable headroom over the worst realistic (non-pathological) session
+# measured so far, while staying small enough that an 8B Q4 model's KV cache
+# doesn't meaningfully strain an 8-core CPU box. Must be identical across
+# warmup()/call_ollama()/stream_ollama() -- Ollama reloads the model runner
+# (losing the warmup) if a later request's num_ctx differs from the one it
+# was first loaded with.
+NUM_CTX = 16384
+
 
 def _resolve_default_model() -> str:
     return os.environ.get("DND_LITE_MODEL", _FALLBACK_MODEL)
@@ -37,7 +52,12 @@ def warmup(model: str = DEFAULT_MODEL) -> None:
     try:
         requests.post(
             OLLAMA_URL,
-            json={"model": model, "messages": [{"role": "user", "content": "hi"}], "stream": False},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": False,
+                "options": {"num_ctx": NUM_CTX},
+            },
             timeout=300,
         )
     except requests.RequestException:
@@ -53,7 +73,12 @@ def call_ollama(messages: list, model: str = DEFAULT_MODEL) -> str:
     try:
         resp = requests.post(
             OLLAMA_URL,
-            json={"model": model, "messages": messages, "stream": False},
+            json={
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "options": {"num_ctx": NUM_CTX},
+            },
             timeout=300,
         )
         resp.raise_for_status()
@@ -73,7 +98,12 @@ def stream_ollama(messages: list, model: str = DEFAULT_MODEL):
     try:
         resp = requests.post(
             OLLAMA_URL,
-            json={"model": model, "messages": messages, "stream": True},
+            json={
+                "model": model,
+                "messages": messages,
+                "stream": True,
+                "options": {"num_ctx": NUM_CTX},
+            },
             timeout=300,
             stream=True,
         )

@@ -77,6 +77,41 @@ def test_call_ollama_uses_generous_timeout_for_cpu_cold_starts():
     assert mock_post.call_args.kwargs["timeout"] >= 300
 
 
+# ---- num_ctx: must be set (correctness, not just speed -- see README's
+# "Response latency") and identical across all three call sites, since
+# Ollama reloads the model runner if a later request's num_ctx differs
+# from the one it was first loaded with, silently discarding any warmup.
+
+def test_call_ollama_sets_num_ctx():
+    fake_resp = MagicMock()
+    fake_resp.raise_for_status.return_value = None
+    fake_resp.json.return_value = {"message": {"content": "ok"}}
+
+    with patch("ollama_client.requests.post", return_value=fake_resp) as mock_post:
+        ollama_client.call_ollama([{"role": "user", "content": "hi"}])
+
+    assert mock_post.call_args.kwargs["json"]["options"]["num_ctx"] == ollama_client.NUM_CTX
+
+
+def test_stream_ollama_sets_num_ctx():
+    fake_resp = MagicMock()
+    fake_resp.raise_for_status.return_value = None
+    fake_resp.iter_lines.return_value = [b'{"message": {"content": "ok"}, "done": true}']
+
+    with patch("ollama_client.requests.post", return_value=fake_resp) as mock_post:
+        list(ollama_client.stream_ollama([{"role": "user", "content": "hi"}]))
+
+    assert mock_post.call_args.kwargs["json"]["options"]["num_ctx"] == ollama_client.NUM_CTX
+
+
+def test_warmup_sets_num_ctx():
+    fake_resp = MagicMock()
+    with patch("ollama_client.requests.post", return_value=fake_resp) as mock_post:
+        ollama_client.warmup()
+
+    assert mock_post.call_args.kwargs["json"]["options"]["num_ctx"] == ollama_client.NUM_CTX
+
+
 def test_resolve_default_model_uses_env_var_when_set(monkeypatch):
     monkeypatch.setenv("DND_LITE_MODEL", "qwen2.5:7b")
     assert ollama_client._resolve_default_model() == "qwen2.5:7b"
