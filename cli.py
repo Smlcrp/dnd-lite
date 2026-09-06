@@ -216,7 +216,7 @@ def _start_new_adventure(acct: dict, dungeon_master: dm.DungeonMaster) -> dict:
     draft = adventure.draft_outline(tone, acct)
     print("\nThe DM is preparing your adventure...")
     full_adventure = architect.build_adventure(
-        draft, character_name, classes, blurb, preset, model=dungeon_master.model
+        draft, character_name, classes, level, blurb, preset, model=dungeon_master.model
     )
 
     session.delete_session(acct["account_name"])

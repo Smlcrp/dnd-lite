@@ -118,6 +118,17 @@ def test_prompt_block_omits_adaptations_section_when_empty():
     assert "LIVE ADAPTATIONS" not in block
 
 
+def test_level_tier_description_boundaries():
+    assert "Tier 1" in adventure.level_tier_description(1)
+    assert "Tier 1" in adventure.level_tier_description(4)
+    assert "Tier 2" in adventure.level_tier_description(5)
+    assert "Tier 2" in adventure.level_tier_description(10)
+    assert "Tier 3" in adventure.level_tier_description(11)
+    assert "Tier 3" in adventure.level_tier_description(16)
+    assert "Tier 4" in adventure.level_tier_description(17)
+    assert "Tier 4" in adventure.level_tier_description(20)
+
+
 def test_presets_shape():
     for name in ("One Shot", "Quest", "Epic"):
         assert name in adventure.PRESETS

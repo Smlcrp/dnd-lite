@@ -191,6 +191,11 @@ def draft_outline(tone: str, account: dict) -> dict:
     picks only — no prose yet. This is pure Python, fully unit-testable,
     no LLM call."""
 
+def level_tier_description(level: int) -> str:
+    """D&D 5e's four tiers of play (see "Tier-of-play scaling" below) --
+    guidance text only, no CR/XP math. Used by both architect.py and
+    dm.py to give the LLM concrete, level-appropriate stakes/power scaling."""
+
 def stage_labels(n_beats: int) -> list[str]:
     """Maps a preset's beat count to act labels, e.g. n=1 -> ["Act 1"],
     n=3 -> ["Act 1", "Act 2", "Act 3"], n=5 -> 5 acts. HOOK, CLIMAX, and
@@ -220,7 +225,7 @@ A single hidden LLM call made once, at adventure creation, that turns the raw ra
 
 ```python
 def build_adventure(draft: dict, character_name: str, classes: list[str],
-                     blurb: str, preset: str) -> dict:
+                     level: int, blurb: str, preset: str) -> dict:
     """One-shot, non-streaming Ollama call via ollama_client.call_ollama().
     Prompts for a JSON object:
       {
@@ -245,7 +250,20 @@ def build_adventure(draft: dict, character_name: str, classes: list[str],
     """
 ```
 
-The system prompt for this call is explicit that: (1) the character's name/classes/blurb should flavor the hook (e.g. a Rogue's hook differs from a Paladin's), (2) the output is never shown to the player directly — it's the DM's private notes — so it can be as blunt/mechanical as needed as long as it's usable, (3) beats are a flexible plan, not a script — the main DM will adapt them as needed.
+The system prompt for this call is explicit that: (1) the character's name/classes/blurb should flavor the hook (e.g. a Rogue's hook differs from a Paladin's), (2) the output is never shown to the player directly — it's the DM's private notes — so it can be as blunt/mechanical as needed as long as it's usable, (3) beats are a flexible plan, not a script — the main DM will adapt them as needed, (4) **encounter scaling** — the antagonist's true power and the climax's stakes must match the character's D&D 5e tier of play (see below), and must agree with the reconciled setting: the setting stays the stage, but what's really happening within it should scale to the tier (a mountain mining town can hide a mundane bandit crew at Tier 1, or a noble's pact with an ancient horror at Tier 3 — same location, different truth).
+
+#### Tier-of-play scaling (`adventure.level_tier_description()`)
+
+The one deliberately hand-written piece of D&D-specific text in the whole app — four short, well-known tier descriptions from the 5e Dungeon Master's Guide, used as concrete prompt scaffolding rather than a lookup table for mechanical math (no CR/XP computed anywhere):
+
+| Level range | Tier |
+|---|---|
+| 1–4 | Tier 1, "Local Heroes" — personal-scale threats, no legendary creatures |
+| 5–10 | Tier 2, "Heroes of the Realm" — real magic/monsters, town-to-region stakes |
+| 11–16 | Tier 3, "Masters of the Realm" — legendary creatures, kingdom-to-planar stakes |
+| 17–20 | Tier 4, "Masters of the World" — godlike threats, world/planar stakes |
+
+Both `architect.py` (adventure creation) and `dm.py` (ongoing narration, via `_encounter_scaling_block(session["level"])`) inject the matching tier description directly into their prompts, with an explicit instruction to be concrete about the escalation (real magical/supernatural power, consequences beyond a single life or building) rather than just scaling up a mundane plan. This was tightened after a real-Ollama test showed a vaguer "escalate appropriately" instruction wasn't reliably producing a difference between a level 1 and a level 15 outline — naming the actual tier fixed it.
 
 ### DM design (`dm.py`)
 
@@ -269,13 +287,14 @@ System prompt blocks, in order:
 4. **Player-agency rules** — never write the player's dialogue, emotions, or unstated decisions; always end at a natural pause.
 5. **Self-reported dice block** — qualitative bands, no DC spoken, no arithmetic (see below).
 6. **5e knowledge block** — tells the model it has full working D&D 5e knowledge (classes, leveling, class features) and should draw on that training directly for flavor and encounter calibration. No hand-built data — this is a couple of sentences, zero added token cost.
-7. **Level progression block** — the DM may narrate level-ups paced like a real campaign ("should happen all the time," per design intent, just kept realistic), but this is flavor only: the app never stores or recalculates a level number. The player's own physical/external character sheet is authoritative, exactly like self-reported dice.
-8. **Tag rules** — the tag set below, including `[ADAPT:]`.
-9. **Adventure block** — `adventure.adventure_prompt_block(session["adventure"])`: the **original outline** (title/setting/hook/antagonist/beats/climax), the **current stage** (`stage_labels()` position + beat rules — don't rush, don't skip to the climax early, don't reveal climax/resolution), and, if any exist, a **live adaptations** section listed last and marked as authoritative over the original where they conflict.
-10. **Story Mode block** — only if `session["story_mode"]`.
-11. **Scene anchor** — last ~400 chars of the prior DM turn, truncated on a sentence boundary, "SCENE IN PROGRESS — DO NOT RESET." This is the key trick that keeps a small local model from losing the thread.
-12. **Opening vs. continuing instruction** — no history → open with the adventure hook + character blurb; scene anchor present → never re-establish setting.
-13. **Final reminder footer** — one-line reiteration of the absolute rule.
+7. **Encounter scaling block** — `dm._encounter_scaling_block(session["level"])`, injecting the concrete tier-of-play description (see "Tier-of-play scaling" above) plus an instruction to escalate the *truth* of the setting to match the tier rather than swapping in a mechanically-right-but-tonally-wrong threat.
+8. **Level progression block** — the DM may narrate level-ups paced like a real campaign ("should happen all the time," per design intent, just kept realistic), but this is flavor only: the app never stores or recalculates a level number. The player's own physical/external character sheet is authoritative, exactly like self-reported dice.
+9. **Tag rules** — the tag set below, including `[ADAPT:]`.
+10. **Adventure block** — `adventure.adventure_prompt_block(session["adventure"])`: the **original outline** (title/setting/hook/antagonist/beats/climax), the **current stage** (`stage_labels()` position + beat rules — don't rush, don't skip to the climax early, don't reveal climax/resolution), and, if any exist, a **live adaptations** section listed last and marked as authoritative over the original where they conflict.
+11. **Story Mode block** — only if `session["story_mode"]`.
+12. **Scene anchor** — last ~400 chars of the prior DM turn, truncated on a sentence boundary, "SCENE IN PROGRESS — DO NOT RESET." This is the key trick that keeps a small local model from losing the thread.
+13. **Opening vs. continuing instruction** — no history → open with the adventure hook + character blurb; scene anchor present → never re-establish setting.
+14. **Final reminder footer** — one-line reiteration of the absolute rule.
 
 No new tag or session/adventure state field was introduced for level-ups — deliberately. Continuity relies on the same history-window + scene-anchor mechanism already used for everything else, consistent with "shouldn't be tracked by the game."
 

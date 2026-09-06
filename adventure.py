@@ -133,6 +133,40 @@ def draft_outline(tone: str, account: dict = None) -> dict:
     }
 
 
+def level_tier_description(level: int) -> str:
+    """D&D 5e's four tiers of play, used to give the LLM concrete,
+    level-appropriate stakes/power scaling instead of a vague 'appropriate
+    for the level' instruction. This is guidance text only -- no mechanical
+    CR/XP math, consistent with relying on the model's own 5e training
+    rather than hand-built reference data."""
+    if level <= 4:
+        return (
+            'Tier 1 ("Local Heroes", levels 1-4): threats are personal-scale '
+            "-- bandits, cultists, wild beasts, a single dangerous "
+            "individual. No legendary creatures, no significant magic "
+            "items, no stakes beyond a town or a handful of lives."
+        )
+    if level <= 10:
+        return (
+            'Tier 2 ("Heroes of the Realm", levels 5-10): real magic and '
+            "monsters enter play -- ogres, hags, young dragons, powerful "
+            "spellcasters. Stakes can affect a town, city, or region."
+        )
+    if level <= 16:
+        return (
+            'Tier 3 ("Masters of the Realm", levels 11-16): legendary '
+            "creatures and formidable magic are in play -- adult or ancient "
+            "dragons, powerful fiends or archmages, ancient evils. Stakes "
+            "can affect a kingdom or brush against another plane."
+        )
+    return (
+        'Tier 4 ("Masters of the World", levels 17-20): godlike or '
+        "world-altering threats -- archdevils, demon lords, servants of "
+        "deities, forces that could unmake reality. Stakes are for the "
+        "world, a plane, or existence itself."
+    )
+
+
 def stage_labels(n_beats: int) -> list:
     """Act labels for a preset's beat count. HOOK, CLIMAX, and RESOLUTION are
     separate, implicit stages that bookend the acts and are not counted here."""

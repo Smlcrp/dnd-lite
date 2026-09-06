@@ -62,6 +62,25 @@ def test_system_prompt_level_progression_is_narrative_only():
     assert "player's own physical or external character sheet" in prompt
 
 
+def test_system_prompt_includes_encounter_scaling_guidance():
+    d = dm.DungeonMaster()
+    prompt = d._build_system_prompt(_sample_session())  # level 3 -> Tier 1
+
+    assert "ENCOUNTER SCALING" in prompt
+    assert "Tier 1" in prompt
+    assert "tonally incongruous" in prompt
+
+
+def test_system_prompt_encounter_scaling_reflects_higher_tier():
+    d = dm.DungeonMaster()
+    s = _sample_session()
+    s["level"] = 14
+    prompt = d._build_system_prompt(s)
+
+    assert "Tier 3" in prompt
+    assert "Tier 1" not in prompt
+
+
 def test_system_prompt_opening_turn_has_no_scene_anchor():
     d = dm.DungeonMaster()
     prompt = d._build_system_prompt(_sample_session(history=[]))

@@ -96,6 +96,25 @@ FIFTH_EDITION_KNOWLEDGE_BLOCK = (
     "are the source of that knowledge."
 )
 
+def _encounter_scaling_block(level: int) -> str:
+    return (
+        "ENCOUNTER SCALING: keep danger matched to the character's D&D 5th "
+        "Edition tier of play (or their current narrative level, if you "
+        "have already narrated a level-up earlier in this adventure):\n"
+        f"  {adventure.level_tier_description(level)}\n\n"
+        "Be concrete about it: at a higher tier, threats should command real "
+        "magical or supernatural power and failure should carry consequences "
+        "reaching beyond a single life or building -- not just a bigger "
+        "version of the same mundane plan. This matters just as much as "
+        "staying true to the established setting and antagonist, and the "
+        "two must always agree: never let a threat's power override what "
+        "makes narrative sense for the scene -- keep the setting as the "
+        "stage and raise what is really happening within it (the local "
+        "threat is backed by something larger, corruption runs deeper than "
+        "it first appeared) rather than parachuting in a "
+        "mechanically-appropriate but tonally incongruous threat."
+    )
+
 LEVEL_PROGRESSION_BLOCK = (
     "LEVEL PROGRESSION: you may narrate the character leveling up when the "
     "story's events warrant it, paced the way a real D&D campaign advances "
@@ -150,6 +169,7 @@ class DungeonMaster:
         blocks.append(PLAYER_AGENCY_RULES)
         blocks.append(SELF_REPORTED_DICE_BLOCK)
         blocks.append(FIFTH_EDITION_KNOWLEDGE_BLOCK)
+        blocks.append(_encounter_scaling_block(session["level"]))
         blocks.append(LEVEL_PROGRESSION_BLOCK)
         blocks.append(TAG_RULES)
         blocks.append(adventure.adventure_prompt_block(session["adventure"]))

@@ -53,9 +53,21 @@ scaffold Flask/web/Electron code until that phase is explicitly started.
   DC-by-level table, or an XP counter, stop — that's dndgame's job, not
   this one.
 - 5e knowledge lives in the LLM's own training, not in this codebase. Do
-  not add a class-features/hit-dice/spell-list data file — the only
-  hand-maintained D&D-specific data allowed is `cli.CLASSES`, a 13-name
-  list used purely for input validation, never sent to the model.
+  not add a class-features/hit-dice/spell-list data file. The only two
+  pieces of hand-maintained D&D-specific data allowed are `cli.CLASSES` (a
+  13-name list for input validation, never sent to the model) and
+  `adventure.level_tier_description()` (D&D 5e's four tiers of play — guidance
+  text injected into prompts for concrete encounter scaling, not a lookup
+  table used to compute anything). Both are prompt scaffolding, not a rules
+  engine — keep it that way.
+- Encounter scaling must respect BOTH the character's level/tier AND the
+  established setting/antagonist — never let one override the other. A
+  higher tier should raise what's really going on inside a setting (a
+  bandit crew becomes a noble's pact with an ancient horror), not replace
+  the setting with an unrelated, more "impressive" one. This was a real bug
+  caught in manual testing: a vague "escalate appropriately" instruction
+  produced near-identical stakes for a level 1 and a level 15 character
+  until the concrete tier text was added — don't revert to vague phrasing.
 - Leveling is narrated, not tracked: the DM may declare a level-up as story
   flavor, paced like real D&D advancement, but no tag or state field
   records it — continuity relies on conversation history + the scene

@@ -17,7 +17,9 @@ REQUIRED_ANTAGONIST_KEYS = {"name", "role", "motivation", "plan"}
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
 
-def _build_messages(draft: dict, character_name: str, classes: list, blurb: str, n_beats: int) -> list:
+def _build_messages(
+    draft: dict, character_name: str, classes: list, level: int, blurb: str, n_beats: int
+) -> list:
     classes_text = "/".join(classes)
     system = (
         "You are an adventure architect for a solo, text-based tabletop-style game. "
@@ -32,6 +34,27 @@ def _build_messages(draft: dict, character_name: str, classes: list, blurb: str,
         "blurb should flavor the hook (a Rogue's hook should differ from a "
         "Paladin's). Beats are a flexible plan, not a script -- the DM running "
         "the actual game will adapt them as needed.\n\n"
+        "ENCOUNTER SCALING: the antagonist's true power, the climax's stakes, "
+        "and any threats implied by the beats must match the character's "
+        "D&D 5th Edition tier of play:\n"
+        f"  {adventure.level_tier_description(level)}\n\n"
+        "Be concrete about it: at "
+        "a higher tier, the antagonist should command real magical or "
+        "supernatural power (or command minions/allies that do) and the "
+        "consequences of failure should reach beyond a single life or "
+        "building, not just gain more followers or a bigger version of the "
+        "same mundane plan.\n\n"
+        "This matters just as much as the setting/tone reconciliation above, "
+        "and the two must agree: never produce a threat whose power fits the "
+        "tier but whose flavor breaks the reconciled setting (e.g. don't "
+        "drop a demon lord into a quiet fishing-village mystery just to hit "
+        "the right tier). Instead, keep the setting as the STAGE and raise "
+        "what is really happening within it to match the tier -- the same "
+        "mountain mining town can be a front for a mundane bandit crew "
+        "(Tier 1) or sit atop a bound ancient horror that a power-hungry "
+        "noble has struck a pact with (Tier 3); the location doesn't have to "
+        "change, but the true nature and scale of the threat inside it "
+        "does.\n\n"
         "Respond with ONLY a single valid JSON object (no markdown code fences, "
         "no commentary before or after) with exactly this shape:\n"
         "{\n"
@@ -53,7 +76,7 @@ def _build_messages(draft: dict, character_name: str, classes: list, blurb: str,
         f"TWIST TYPE (weave in as a later complication, not the hook): {draft['twist_type']}\n"
         f"CLIMAX TYPE: {draft['climax_type']}\n"
         f"TONE: {draft['tone']}\n\n"
-        f"PLAYER CHARACTER: {character_name}, {classes_text}.\n"
+        f"PLAYER CHARACTER: {character_name}, a level {level} {classes_text}.\n"
         f'Personality/background: "{blurb}"\n\n'
         f'Write exactly {n_beats} beat(s) in "beats".'
     )
@@ -141,13 +164,14 @@ def build_adventure(
     draft: dict,
     character_name: str,
     classes: list,
+    level: int,
     blurb: str,
     preset: str,
     model: str = None,
 ) -> dict:
     model = model or ollama_client.DEFAULT_MODEL
     n_beats = adventure.PRESETS[preset]["beats"]
-    messages = _build_messages(draft, character_name, classes, blurb, n_beats)
+    messages = _build_messages(draft, character_name, classes, level, blurb, n_beats)
 
     raw = ollama_client.call_ollama(messages, model)
     parsed = _parse_adventure_json(raw, n_beats)
